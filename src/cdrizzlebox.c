@@ -20,6 +20,17 @@
 static const double lut_delta = 0.003; /* spacing of Lanczos LUT */
 
 /** ---------------------------------------------------------------------------
+ * The output weights are stored as float32. A weight that is too small to be
+ * stored there would be recorded as zero, leaving an output pixel with a value
+ * and context but no weight, so such a weight is treated as zero.
+ */
+static inline_macro double
+storable_weight(const double weight)
+{
+    return ((float) weight == 0.0f) ? 0.0 : weight;
+}
+
+/** ---------------------------------------------------------------------------
  * Update the flux and counts in the output image using a weighted average
  *
  * p:   structure containing options, input, and output
@@ -31,12 +42,13 @@ static const double lut_delta = 0.003; /* spacing of Lanczos LUT */
 
 inline_macro static int
 update_data(
-    struct driz_param_t *p, const integer_t ii, const integer_t jj, const float d, const float dow)
+    struct driz_param_t *p, const integer_t ii, const integer_t jj, const double d,
+    const double dow)
 {
     double vc_plus_dow;
-    float vc;
+    double vc;
 
-    if (dow == 0.0f) {
+    if (dow == 0.0) {
         return 0;
     }
 
@@ -45,7 +57,7 @@ update_data(
 
     vc_plus_dow = vc + dow;
 
-    if (vc == 0.0f) {
+    if (vc == 0.0) {
         if (oob_pixel(p->output_data, ii, jj)) {
             driz_error_format_message(p->error, "OOB in output_data[%d,%d]", ii, jj);
             return 1;
@@ -89,12 +101,12 @@ update_data(
  */
 inline_macro static int
 update_data_var(
-    struct driz_param_t *p, const integer_t ii, const integer_t jj, const float d, const float dow,
-    float *d2, unsigned int dq)
+    struct driz_param_t *p, const integer_t ii, const integer_t jj, const double d,
+    const double dow, double *d2, unsigned int dq)
 {
     double vc_plus_dow, vc_plus_dow2;
     double v, vc2, dow2;
-    float vc;
+    double vc;
     int i;
     int output_dq_value;
     PyArrayObject **arr2;
@@ -104,7 +116,7 @@ update_data_var(
         return 1;
     }
 
-    if (dow == 0.0f) {
+    if (dow == 0.0) {
         return 0;
     }
 
@@ -114,7 +126,7 @@ update_data_var(
     // new output image weight:
     vc_plus_dow = vc + dow;
 
-    if (vc == 0.0f) {
+    if (vc == 0.0) {
         set_pixel(p->output_data, ii, jj, d);
         if (d2 && (arr2 = p->output_data2)) {
             for (i = 0; i < p->ndata2; ++i) {
@@ -495,14 +507,14 @@ over(
  * information.
  * @param bounding_polygon Pointer to the polygon structure representing the
  * region of interest.
- * @param pscale_ratio Pointer to a float where the computed pixel scale ratio
+ * @param pscale_ratio Pointer to a double where the computed pixel scale ratio
  * will be stored.
  *
  * @return 0 on success, 1 on failure. On failure, an error message is set in
  * p->error.
  */
 int
-compute_pscale_ratio(struct driz_param_t *p, struct polygon *bounding_polygon, float *pscale_ratio)
+compute_pscale_ratio(struct driz_param_t *p, struct polygon *bounding_polygon, double *pscale_ratio)
 {
     integer_t i, j, nx, ny, mapsize[2];
     double cx, cy;
@@ -535,7 +547,7 @@ compute_pscale_ratio(struct driz_param_t *p, struct polygon *bounding_polygon, f
     cd12 = oy1 - oy;
     cd21 = ox2 - ox;
     cd22 = oy2 - oy;
-    *pscale_ratio = (float) sqrt(fabs(cd11 * cd22 - cd12 * cd21));
+    *pscale_ratio = sqrt(fabs(cd11 * cd22 - cd12 * cd21));
 
     return 0;
 
@@ -556,7 +568,7 @@ do_kernel_point_var(struct driz_param_t *p)
     struct scanner s;
     integer_t i, j, ii, jj, k;
     integer_t osize[2];
-    float d, dow, *d2 = NULL, iscale2 = 1.0f;
+    double d, dow, *d2 = NULL, iscale2 = 1.0;
     integer_t bv;
     int xmin, xmax, ymin, ymax, n, ndata2;
     unsigned int dqval = 0;
@@ -578,7 +590,7 @@ do_kernel_point_var(struct driz_param_t *p)
     if (ndata2 > 0) {
         iscale2 = p->iscale * p->iscale;
 
-        if (!(d2 = (float *) malloc(p->ndata2 * sizeof(float)))) {
+        if (!(d2 = (double *) malloc(p->ndata2 * sizeof(double)))) {
             driz_error_set(p->error, PyExc_MemoryError, "Memory allocation failed.");
             return 1;
         }
@@ -642,7 +654,7 @@ do_kernel_point_var(struct driz_param_t *p)
                         if (p->data2[k]) {
                             d2[k] = get_pixel(p->data2[k], i, j) * iscale2;
                         } else {
-                            d2[k] = 0.0f;
+                            d2[k] = 0.0;
                         }
                     }
 
@@ -650,9 +662,9 @@ do_kernel_point_var(struct driz_param_t *p)
                        that we DON'T scale by the Jacobian as it hasn't been
                        calculated */
                     if (p->weights) {
-                        dow = get_pixel(p->weights, i, j) * p->weight_scale;
+                        dow = storable_weight(get_pixel(p->weights, i, j) * p->weight_scale);
                     } else {
-                        dow = 1.0f;
+                        dow = 1.0;
                     }
 
                     if (p->dq) {
@@ -661,7 +673,7 @@ do_kernel_point_var(struct driz_param_t *p)
 
                     /* If we are creating or modifying the context image,
                        we do so here. */
-                    if (p->output_context && dow > 0.0f) {
+                    if (p->output_context && dow > 0.0) {
                         set_bit(p->output_context, ii, jj, bv);
                     }
 
@@ -691,7 +703,7 @@ do_kernel_gaussian_var(struct driz_param_t *p)
     struct scanner s;
     integer_t bv, i, j, ii, jj, k, nxi, nxa, nyi, nya, nhit;
     integer_t osize[2];
-    float d, dow, *d2 = NULL, iscale2 = 1.0f;
+    double d, dow, *d2 = NULL, iscale2 = 1.0;
     double gaussian_efac, gaussian_es;
     double pfo, ac, w, ddx, ddy, r2, dover, kscale2;
     const double nsig = 2.5;
@@ -716,10 +728,10 @@ do_kernel_gaussian_var(struct driz_param_t *p)
         return 1;
     }
 
-    kscale2 = (double) p->pscale_ratio * (double) p->pscale_ratio;
+    kscale2 = p->pscale_ratio * p->pscale_ratio;
 
-    pfo = nsig * p->pixel_fraction / 2.3548 / (double) p->pscale_ratio;
-    pfo = CLAMP_ABOVE(pfo, 1.2 / (double) p->pscale_ratio);
+    pfo = nsig * p->pixel_fraction / 2.3548 / p->pscale_ratio;
+    pfo = CLAMP_ABOVE(pfo, 1.2 / p->pscale_ratio);
 
     ac = 1.0 / (p->pixel_fraction * p->pixel_fraction);
     bv = compute_bit_value(p->uuid);
@@ -736,7 +748,7 @@ do_kernel_gaussian_var(struct driz_param_t *p)
 
     if (ndata2 > 0) {
         iscale2 = p->iscale * p->iscale;
-        if (!(d2 = (float *) malloc(p->ndata2 * sizeof(float)))) {
+        if (!(d2 = (double *) malloc(p->ndata2 * sizeof(double)))) {
             driz_error_set(p->error, PyExc_MemoryError, "Memory allocation failed.");
             return 1;
         }
@@ -800,7 +812,7 @@ do_kernel_gaussian_var(struct driz_param_t *p)
                     if (p->data2[k]) {
                         d2[k] = get_pixel(p->data2[k], i, j) * iscale2;
                     } else {
-                        d2[k] = 0.0f;
+                        d2[k] = 0.0;
                     }
                 }
 
@@ -829,11 +841,11 @@ do_kernel_gaussian_var(struct driz_param_t *p)
                         /* Count the hits */
                         ++nhit;
 
-                        dow = (float) (dover * w);
+                        dow = storable_weight(dover * w);
 
                         /* If we are creating or modifying the context
                            image, we do so here. */
-                        if (p->output_context && dow > 0.0f) {
+                        if (p->output_context && dow > 0.0) {
                             set_bit(p->output_context, ii, jj, bv);
                         }
 
@@ -873,7 +885,7 @@ do_kernel_lanczos_var(struct driz_param_t *p)
     struct scanner s;
     integer_t bv, i, j, ii, jj, k, nxi, nxa, nyi, nya, nhit;
     integer_t osize[2];
-    float d, dow, *d2 = NULL, iscale2 = 1.0f;
+    double d, dow, *d2 = NULL, iscale2 = 1.0;
     double pfo, xx, yy, w, dover;
     int kernel_order;
     size_t nlut;
@@ -916,7 +928,7 @@ do_kernel_lanczos_var(struct driz_param_t *p)
         return 1;
     }
 
-    pfo = (double) kernel_order / (double) p->pscale_ratio;
+    pfo = (double) kernel_order / p->pscale_ratio;
     sdp = p->pscale_ratio / lut_delta;
 
     p->nskip = (p->ymax - p->ymin) - (ymax - ymin);
@@ -929,7 +941,7 @@ do_kernel_lanczos_var(struct driz_param_t *p)
     if (ndata2 > 0) {
         iscale2 = p->iscale * p->iscale;
 
-        if (!(d2 = (float *) malloc(p->ndata2 * sizeof(float)))) {
+        if (!(d2 = (double *) malloc(p->ndata2 * sizeof(double)))) {
             driz_error_set(p->error, PyExc_MemoryError, "Memory allocation failed.");
             free(lut);
             return 1;
@@ -993,7 +1005,7 @@ do_kernel_lanczos_var(struct driz_param_t *p)
                     if (p->data2[k]) {
                         d2[k] = get_pixel(p->data2[k], i, j) * iscale2;
                     } else {
-                        d2[k] = 0.0f;
+                        d2[k] = 0.0;
                     }
                 }
 
@@ -1025,11 +1037,11 @@ do_kernel_lanczos_var(struct driz_param_t *p)
                          * Y */
                         dover = lut[ix] * lut[iy];
 
-                        dow = (float) (dover * w);
+                        dow = storable_weight(dover * w);
 
                         /* If we are creating or modifying the context
                            image, we do so here. */
-                        if (p->output_context && dow > 0.0f) {
+                        if (p->output_context && dow > 0.0) {
                             set_bit(p->output_context, ii, jj, bv);
                         }
 
@@ -1073,7 +1085,7 @@ do_kernel_turbo_var(struct driz_param_t *p)
     struct scanner s;
     integer_t bv, i, j, ii, jj, k, nhit, iis, iie, jjs, jje;
     integer_t osize[2];
-    float d, dow, *d2 = NULL, iscale2 = 1.0f;
+    double d, dow, *d2 = NULL, iscale2 = 1.0;
     double pfo, dover_scale, ac;
     double xxi, xxa, yyi, yya, w, dover;
     int xmin, xmax, ymin, ymax, n, ndata2;
@@ -1098,7 +1110,7 @@ do_kernel_turbo_var(struct driz_param_t *p)
     }
 
     pfo = p->pixel_fraction / p->pscale_ratio / 2.0;
-    dover_scale = ac * (double) p->pscale_ratio * (double) p->pscale_ratio;
+    dover_scale = ac * p->pscale_ratio * p->pscale_ratio;
 
     p->nskip = (p->ymax - p->ymin) - (ymax - ymin);
     p->nmiss = p->nskip * (p->xmax - p->xmin);
@@ -1110,7 +1122,7 @@ do_kernel_turbo_var(struct driz_param_t *p)
     if (ndata2 > 0) {
         iscale2 = p->iscale * p->iscale;
 
-        if (!(d2 = (float *) malloc(ndata2 * sizeof(float)))) {
+        if (!(d2 = (double *) malloc(ndata2 * sizeof(double)))) {
             driz_error_set(p->error, PyExc_MemoryError, "Memory allocation failed.");
             return 1;
         }
@@ -1178,7 +1190,7 @@ do_kernel_turbo_var(struct driz_param_t *p)
                     if (p->data2[k]) {
                         d2[k] = get_pixel(p->data2[k], i, j) * iscale2;
                     } else {
-                        d2[k] = 0.0f;
+                        d2[k] = 0.0;
                     }
                 }
 
@@ -1206,11 +1218,11 @@ do_kernel_turbo_var(struct driz_param_t *p)
                             /* Count the hits */
                             ++nhit;
 
-                            dow = (float) (dover * w);
+                            dow = storable_weight(dover * w);
 
                             /* If we are creating or modifying the context
                                image, we do so here. */
-                            if (p->output_context && dow > 0.0f) {
+                            if (p->output_context && dow > 0.0) {
                                 set_bit(p->output_context, ii, jj, bv);
                             }
 
@@ -1252,7 +1264,7 @@ do_kernel_square_var(struct driz_param_t *p)
 {
     integer_t bv, i, j, ii, jj, k, min_ii, max_ii, min_jj, max_jj, nhit;
     integer_t osize[2], mapsize[2];
-    float d, dow, *d2 = NULL, iscale2 = 1.0f;
+    double d, dow, *d2 = NULL, iscale2 = 1.0;
     double dh, jaco, dover, w;
 
     double xin[4], yin[4], xout[4], yout[4];
@@ -1285,7 +1297,7 @@ do_kernel_square_var(struct driz_param_t *p)
     if (ndata2 > 0) {
         iscale2 = p->iscale * p->iscale;
 
-        if (!(d2 = (float *) malloc(p->ndata2 * sizeof(float)))) {
+        if (!(d2 = (double *) malloc(p->ndata2 * sizeof(double)))) {
             driz_error_set(p->error, PyExc_MemoryError, "Memory allocation failed.");
             return 1;
         }
@@ -1373,8 +1385,8 @@ do_kernel_square_var(struct driz_param_t *p)
              * out.
              */
 
-            jaco = 0.5f * ((xout[1] - xout[3]) * (yout[0] - yout[2]) -
-                           (xout[0] - xout[2]) * (yout[1] - yout[3]));
+            jaco = 0.5 * ((xout[1] - xout[3]) * (yout[0] - yout[2]) -
+                          (xout[0] - xout[2]) * (yout[1] - yout[3]));
 
             /* Allow for stretching because of scale change */
             d = get_pixel(p->data, i, j) * p->iscale;
@@ -1382,7 +1394,7 @@ do_kernel_square_var(struct driz_param_t *p)
                 if (p->data2[k]) {
                     d2[k] = get_pixel(p->data2[k], i, j) * iscale2;
                 } else {
-                    d2[k] = 0.0f;
+                    d2[k] = 0.0;
                 }
             }
 
@@ -1411,14 +1423,14 @@ do_kernel_square_var(struct driz_param_t *p)
                     /* Could be positive or negative, depending on the sign
                      * of jaco */
                     if (dover != 0.0) {
-                        dow = (float) (dover * w);
+                        dow = storable_weight(dover * w);
 
                         /* Count the hits */
                         ++nhit;
 
                         /* If we are creating or modifying the context image
                            we do so here */
-                        if (p->output_context && dow > 0.0f) {
+                        if (p->output_context && dow > 0.0) {
                             set_bit(p->output_context, ii, jj, bv);
                         }
 
@@ -1459,7 +1471,7 @@ do_kernel_point(struct driz_param_t *p)
     struct scanner s;
     integer_t i, j, ii, jj;
     integer_t osize[2];
-    float d, dow;
+    double d, dow;
     integer_t bv;
     int xmin, xmax, ymin, ymax, n;
 
@@ -1516,14 +1528,14 @@ do_kernel_point(struct driz_param_t *p)
                        that we DON'T scale by the Jacobian as it hasn't been
                        calculated */
                     if (p->weights) {
-                        dow = get_pixel(p->weights, i, j) * p->weight_scale;
+                        dow = storable_weight(get_pixel(p->weights, i, j) * p->weight_scale);
                     } else {
-                        dow = 1.0f;
+                        dow = 1.0;
                     }
 
                     /* If we are creating or modifying the context image,
                        we do so here. */
-                    if (p->output_context && dow > 0.0f) {
+                    if (p->output_context && dow > 0.0) {
                         set_bit(p->output_context, ii, jj, bv);
                     }
 
@@ -1551,7 +1563,7 @@ do_kernel_gaussian(struct driz_param_t *p)
     struct scanner s;
     integer_t bv, i, j, ii, jj, nxi, nxa, nyi, nya, nhit;
     integer_t osize[2];
-    float d, dow;
+    double d, dow;
     double gaussian_efac, gaussian_es;
     double pfo, ac, kscale2, w, ddx, ddy, r2, dover;
     const double nsig = 2.5;
@@ -1573,11 +1585,11 @@ do_kernel_gaussian(struct driz_param_t *p)
        divided by the scale so that there are never holes in the
        output */
 
-    pfo = nsig * p->pixel_fraction / 2.3548 / (double) p->pscale_ratio;
-    pfo = CLAMP_ABOVE(pfo, 1.2 / (double) p->pscale_ratio);
+    pfo = nsig * p->pixel_fraction / 2.3548 / p->pscale_ratio;
+    pfo = CLAMP_ABOVE(pfo, 1.2 / p->pscale_ratio);
 
     ac = 1.0 / (p->pixel_fraction * p->pixel_fraction);
-    kscale2 = (double) p->pscale_ratio * (double) p->pscale_ratio;
+    kscale2 = p->pscale_ratio * p->pscale_ratio;
     bv = compute_bit_value(p->uuid);
 
     gaussian_efac = (2.3548 * 2.3548) * kscale2 * ac / 2.0;
@@ -1652,11 +1664,11 @@ do_kernel_gaussian(struct driz_param_t *p)
                         /* Count the hits */
                         ++nhit;
 
-                        dow = (float) (dover * w);
+                        dow = storable_weight(dover * w);
 
                         /* If we are creating or modifying the context
                            image, we do so here. */
-                        if (p->output_context && dow > 0.0f) {
+                        if (p->output_context && dow > 0.0) {
                             set_bit(p->output_context, ii, jj, bv);
                         }
 
@@ -1690,7 +1702,7 @@ do_kernel_lanczos(struct driz_param_t *p)
     struct scanner s;
     integer_t bv, i, j, ii, jj, nxi, nxa, nyi, nya, nhit;
     integer_t osize[2];
-    float d, dow;
+    double d, dow;
     double pfo, xx, yy, w, dover;
     int kernel_order;
     size_t nlut;
@@ -1730,8 +1742,8 @@ do_kernel_lanczos(struct driz_param_t *p)
         return 1;
     }
 
-    pfo = (double) kernel_order / (double) p->pscale_ratio;
-    sdp = (double) p->pscale_ratio / lut_delta;
+    pfo = (double) kernel_order / p->pscale_ratio;
+    sdp = p->pscale_ratio / lut_delta;
 
     p->nskip = (p->ymax - p->ymin) - (ymax - ymin);
     p->nmiss = p->nskip * (p->xmax - p->xmin);
@@ -1802,11 +1814,11 @@ do_kernel_lanczos(struct driz_param_t *p)
                          * Y */
                         dover = lut[ix] * lut[iy];
 
-                        dow = (float) (dover * w);
+                        dow = storable_weight(dover * w);
 
                         /* If we are creating or modifying the context
                            image, we do so here. */
-                        if (p->output_context && dow > 0.0f) {
+                        if (p->output_context && dow > 0.0) {
                             set_bit(p->output_context, ii, jj, bv);
                         }
 
@@ -1843,7 +1855,7 @@ do_kernel_turbo(struct driz_param_t *p)
     struct scanner s;
     integer_t bv, i, j, ii, jj, nhit, iis, iie, jjs, jje;
     integer_t osize[2];
-    float d, dow;
+    double d, dow;
     double pfo, ac;
     double xxi, xxa, yyi, yya, w, dover, dover_scale;
     int xmin, xmax, ymin, ymax, n;
@@ -1865,7 +1877,7 @@ do_kernel_turbo(struct driz_param_t *p)
     }
 
     pfo = p->pixel_fraction / p->pscale_ratio / 2.0;
-    dover_scale = ac * (double) p->pscale_ratio * (double) p->pscale_ratio;
+    dover_scale = ac * p->pscale_ratio * p->pscale_ratio;
 
     p->nskip = (p->ymax - p->ymin) - (ymax - ymin);
     p->nmiss = p->nskip * (p->xmax - p->xmin);
@@ -1941,11 +1953,11 @@ do_kernel_turbo(struct driz_param_t *p)
                             /* Count the hits */
                             ++nhit;
 
-                            dow = (float) (dover * w);
+                            dow = storable_weight(dover * w);
 
                             /* If we are creating or modifying the context
                                image, we do so here. */
-                            if (p->output_context && dow > 0.0f) {
+                            if (p->output_context && dow > 0.0) {
                                 set_bit(p->output_context, ii, jj, bv);
                             }
 
@@ -1983,7 +1995,7 @@ do_kernel_square(struct driz_param_t *p)
 {
     integer_t bv, i, j, ii, jj, min_ii, max_ii, min_jj, max_jj, nhit;
     integer_t osize[2], mapsize[2];
-    float d, dow;
+    double d, dow;
     double dh, jaco, dover, w;
     double xin[4], yin[4], xout[4], yout[4];
 
@@ -2073,8 +2085,8 @@ do_kernel_square(struct driz_param_t *p)
              * out.
              */
 
-            jaco = 0.5f * ((xout[1] - xout[3]) * (yout[0] - yout[2]) -
-                           (xout[0] - xout[2]) * (yout[1] - yout[3]));
+            jaco = 0.5 * ((xout[1] - xout[3]) * (yout[0] - yout[2]) -
+                          (xout[0] - xout[2]) * (yout[1] - yout[3]));
 
             /* Allow for stretching because of scale change */
             d = get_pixel(p->data, i, j) * p->iscale;
@@ -2104,14 +2116,14 @@ do_kernel_square(struct driz_param_t *p)
                     /* Could be positive or negative, depending on the sign
                      * of jaco */
                     if (dover != 0.0) {
-                        dow = (float) (dover * w);
+                        dow = storable_weight(dover * w);
 
                         /* Count the hits */
                         ++nhit;
 
                         /* If we are creating or modifying the context image
                            we do so here */
-                        if (p->output_context && dow > 0.0f) {
+                        if (p->output_context && dow > 0.0) {
                             set_bit(p->output_context, ii, jj, bv);
                         }
 

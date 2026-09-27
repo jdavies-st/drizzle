@@ -127,10 +127,10 @@ struct driz_param_t {
     /* Options */
     enum e_kernel_t kernel;
     double pixel_fraction;
-    float exposure_time;
-    float weight_scale;
-    float fill_value;
-    float fill_value2;
+    double exposure_time;
+    double weight_scale;
+    double fill_value;
+    double fill_value2;
     bool_t do_fill;
     bool_t do_fill2;
     enum e_unit_t in_units;
@@ -146,8 +146,8 @@ struct driz_param_t {
     integer_t out_ny;
 
     /* Scaling */
-    float iscale;
-    float pscale_ratio; /* Scaling used for kernel size in tdriz. 0 or negative
+    double iscale;
+    double pscale_ratio; /* Scaling used for kernel size in tdriz. 0 or negative
                      means it will be estimated from pixmap for t*/
 
     /* Image subset */
@@ -158,8 +158,8 @@ struct driz_param_t {
 
     /* Blotting-specific parameters */
     enum e_interp_t interpolation;
-    float ef;
-    float misval;
+    double ef;
+    double misval;
 
     /* Input images */
     PyArrayObject *data;
@@ -338,18 +338,12 @@ get_uint_pixel(PyArrayObject *image, integer_t xpix, integer_t ypix)
     return *(unsigned int *) PyArray_GETPTR2(image, ypix, xpix);
 }
 
-static inline_macro float
+/* Images are stored as float32; values are read and written as double so
+   that all arithmetic is done in double precision. */
+static inline_macro double
 get_pixel(PyArrayObject *image, integer_t xpix, integer_t ypix)
 {
     return *(float *) PyArray_GETPTR2(image, ypix, xpix);
-}
-
-static inline_macro float
-get_pixel_at_pos(PyArrayObject *image, integer_t pos)
-{
-    float *imptr;
-    imptr = (float *) PyArray_DATA(image);
-    return imptr[(Py_ssize_t) pos];
 }
 
 static inline_macro void
@@ -444,29 +438,6 @@ double
 mgf2(double lambda);
 
 /**
-Weighted sum of 2 real vectors.
-
-was: WSUMR
-*/
-static inline_macro void
-weighted_sum_vectors(
-    const integer_t npix, const float *a /*[npix]*/, const float w1, const float *b /*[npix]*/,
-    const float w2,
-    /* Output arguments */
-    float *c /*[npix]*/)
-{
-    float *c_end = c + npix;
-
-    assert(a);
-    assert(b);
-    assert(c);
-
-    while (c != c_end) {
-        *(c++) = *(a++) * w1 + *(b++) * w2;
-    }
-}
-
-/**
  Round to nearest integer in a way that mimics fortrans NINT
 */
 static inline_macro integer_t
@@ -474,12 +445,6 @@ nintd(const double x)
 {
     return (integer_t) round(x);
     // return (x >= 0) ? (integer_t)floor(x + .5) : (integer_t)-floor(.5 - x);
-}
-static inline_macro integer_t
-nintf(const float x)
-{
-    return (integer_t) roundf(x);
-    // return (x >= 0) ? (integer_t)floorf(x + .5) : (integer_t)-floorf(.5 - x);
 }
 
 static inline_macro double

@@ -34,9 +34,9 @@ static const double lut_delta = 0.003; /* spacing of Lanczos LUT */
  */
 
 typedef int(interp_function)(
-    const void *, PyArrayObject *, const float, const float,
+    const void *, PyArrayObject *, const double, const double,
     /* Output parameters */
-    float *, struct driz_error_t *);
+    double *, struct driz_error_t *);
 
 /** ---------------------------------------------------------------------------
  * A standard set of asserts for all of the interpolation functions
@@ -46,8 +46,8 @@ typedef int(interp_function)(
     assert(data);                              \
     assert(isize[0] > 0);                      \
     assert(isize[1] > 0);                      \
-    assert(x >= 0.0f && x < (float) isize[0]); \
-    assert(y >= 0.0f && y < (float) isize[1]); \
+    assert(x >= 0.0 && x < (double) isize[0]); \
+    assert(y >= 0.0 && y < (double) isize[1]); \
     assert(value);                             \
     assert(error);
 
@@ -69,15 +69,15 @@ typedef int(interp_function)(
 
 static inline_macro int
 ii_bipoly3(
-    const float *coeff /* [len_coeff][len_coeff] */, const integer_t len_coeff,
-    const integer_t firstt, const integer_t npts, const float *x /* [npts] */,
-    const float *y /* [npts] */,
+    const double *coeff /* [len_coeff][len_coeff] */, const integer_t len_coeff,
+    const integer_t firstt, const integer_t npts, const double *x /* [npts] */,
+    const double *y /* [npts] */,
     /* Output parameters */
-    float *zfit /* [npts] */, struct driz_error_t *error)
+    double *zfit /* [npts] */, struct driz_error_t *error)
 {
-    float sx, tx, sx2m1, tx2m1, sy, ty;
-    float cd20[4], cd21[4], ztemp[4];
-    float cd20y, cd21y;
+    double sx, tx, sx2m1, tx2m1, sy, ty;
+    double cd20[4], cd21[4], ztemp[4];
+    double cd20y, cd21y;
     integer_t nxold, nyold;
     integer_t nx, ny;
     integer_t firstw, index;
@@ -93,12 +93,12 @@ ii_bipoly3(
             return 1;
         }
 
-        sx = x[i] - (float) nx;
-        tx = 1.0f - sx;
-        sx2m1 = sx * sx - 1.0f;
-        tx2m1 = tx * tx - 1.0f;
-        sy = y[i] - (float) ny;
-        ty = 1.0f - sy;
+        sx = x[i] - (double) nx;
+        tx = 1.0 - sx;
+        sx2m1 = sx * sx - 1.0;
+        tx2m1 = tx * tx - 1.0;
+        sy = y[i] - (double) ny;
+        ty = 1.0 - sy;
 
         /* Calculate pointer to data[nx, ny-1] */
         firstw = firstt + (ny - 2) * len_coeff + nx - 1;
@@ -112,8 +112,8 @@ ii_bipoly3(
             for (j = 0, index = firstw; j < 4; ++j, index += len_coeff) {
                 assert(index > 0 && index < (len_coeff * len_coeff) - 2);
 
-                cd20[j] = 1.0f / 6.0f * (coeff[index + 1] - 2.0f * coeff[index] + coeff[index - 1]);
-                cd21[j] = 1.0f / 6.0f * (coeff[index + 2] - 2.0f * coeff[index + 1] + coeff[index]);
+                cd20[j] = 1.0 / 6.0 * (coeff[index + 1] - 2.0 * coeff[index] + coeff[index - 1]);
+                cd21[j] = 1.0 / 6.0 * (coeff[index + 2] - 2.0 * coeff[index + 1] + coeff[index]);
             }
         }
 
@@ -126,12 +126,12 @@ ii_bipoly3(
         }
 
         /* Calculate y central differences */
-        cd20y = 1.0f / 6.0f * (ztemp[2] - 2.0f * ztemp[1] + ztemp[0]);
-        cd21y = 1.0f / 6.0f * (ztemp[3] - 2.0f * ztemp[2] + ztemp[1]);
+        cd20y = 1.0 / 6.0 * (ztemp[2] - 2.0 * ztemp[1] + ztemp[0]);
+        cd21y = 1.0 / 6.0 * (ztemp[3] - 2.0 * ztemp[2] + ztemp[1]);
 
         /* Interpolate in y */
         zfit[i] =
-            sy * (ztemp[2] + (sy * sy - 1.0f) * cd21y) + ty * (ztemp[1] + (ty * ty - 1.0f) * cd20y);
+            sy * (ztemp[2] + (sy * sy - 1.0) * cd21y) + ty * (ztemp[1] + (ty * ty - 1.0) * cd20y);
 
         nxold = nx;
         nyold = ny;
@@ -156,19 +156,19 @@ ii_bipoly3(
 
 static inline_macro int
 ii_bipoly5(
-    const float *coeff /* [len_coeff][len_coeff] */, const integer_t len_coeff,
-    const integer_t firstt, const integer_t npts, const float *x /* [npts] */,
-    const float *y /* [npts] */,
+    const double *coeff /* [len_coeff][len_coeff] */, const integer_t len_coeff,
+    const integer_t firstt, const integer_t npts, const double *x /* [npts] */,
+    const double *y /* [npts] */,
     /* Output parameters */
-    float *zfit /* [npts] */, struct driz_error_t *error)
+    double *zfit /* [npts] */, struct driz_error_t *error)
 {
     integer_t nxold, nyold;
     integer_t nx, ny;
-    float sx, sx2, tx, tx2, sy, sy2, ty, ty2;
-    float sx2m1, sx2m4, tx2m1, tx2m4;
-    float cd20[6], cd21[6], cd40[6], cd41[6];
-    float cd20y, cd21y, cd40y, cd41y;
-    float ztemp[6];
+    double sx, sx2, tx, tx2, sy, sy2, ty, ty2;
+    double sx2m1, sx2m4, tx2m1, tx2m4;
+    double cd20[6], cd21[6], cd40[6], cd41[6];
+    double cd20y, cd21y, cd40y, cd41y;
+    double ztemp[6];
     integer_t firstw, index;
     integer_t i, j;
 
@@ -189,18 +189,18 @@ ii_bipoly5(
             return 1;
         }
 
-        sx = x[i] - (float) nx;
+        sx = x[i] - (double) nx;
         sx2 = sx * sx;
-        sx2m1 = sx2 - 1.0f;
-        sx2m4 = sx2 - 4.0f;
-        tx = 1.0f - sx;
+        sx2m1 = sx2 - 1.0;
+        sx2m4 = sx2 - 4.0;
+        tx = 1.0 - sx;
         tx2 = tx * tx;
-        tx2m1 = tx2 - 1.0f;
-        tx2m4 = tx2 - 4.0f;
+        tx2m1 = tx2 - 1.0;
+        tx2m4 = tx2 - 4.0;
 
-        sy = y[i] - (float) ny;
+        sy = y[i] - (double) ny;
         sy2 = sy * sy;
-        ty = 1.0f - sy;
+        ty = 1.0 - sy;
         ty2 = ty * ty;
 
         /* Calculate value of pointer to data[nx,ny-2] */
@@ -211,14 +211,14 @@ ii_bipoly5(
             for (j = 0, index = firstw; j < 6; ++j, index += len_coeff) {
                 assert(index >= 1 && index < len_coeff * len_coeff - 3);
 
-                cd20[j] = 1.0f / 6.0f * (coeff[index + 1] - 2.0f * coeff[index] + coeff[index - 1]);
-                cd21[j] = 1.0f / 6.0f * (coeff[index + 2] - 2.0f * coeff[index + 1] + coeff[index]);
-                cd40[j] = 1.0f / 120.0f *
-                          (coeff[index - 2] - 4.0f * coeff[index - 1] + 6.0f * coeff[index] -
-                           4.0f * coeff[index + 1] + coeff[index + 2]);
-                cd41[j] = 1.0f / 120.0f *
-                          (coeff[index - 1] - 4.0f * coeff[index] + 6.0f * coeff[index + 1] -
-                           4.0f * coeff[index + 2] + coeff[index + 3]);
+                cd20[j] = 1.0 / 6.0 * (coeff[index + 1] - 2.0 * coeff[index] + coeff[index - 1]);
+                cd21[j] = 1.0 / 6.0 * (coeff[index + 2] - 2.0 * coeff[index + 1] + coeff[index]);
+                cd40[j] = 1.0 / 120.0 *
+                          (coeff[index - 2] - 4.0 * coeff[index - 1] + 6.0 * coeff[index] -
+                           4.0 * coeff[index + 1] + coeff[index + 2]);
+                cd41[j] = 1.0 / 120.0 *
+                          (coeff[index - 1] - 4.0 * coeff[index] + 6.0 * coeff[index + 1] -
+                           4.0 * coeff[index + 2] + coeff[index + 3]);
             }
         }
 
@@ -231,16 +231,16 @@ ii_bipoly5(
         }
 
         /* Central differences in y */
-        cd20y = 1.0f / 6.0f * (ztemp[3] - 2.0f * ztemp[2] + ztemp[1]);
-        cd21y = 1.0f / 6.0f * (ztemp[4] - 2.0f * ztemp[3] + ztemp[2]);
-        cd40y = 1.0f / 120.0f *
-                (ztemp[0] - 4.0f * ztemp[1] + 6.0f * ztemp[2] - 4.0f * ztemp[3] + ztemp[4]);
-        cd41y = 1.0f / 120.0f *
-                (ztemp[1] - 4.0f * ztemp[2] + 6.0f * ztemp[3] - 4.0f * ztemp[4] + ztemp[5]);
+        cd20y = 1.0 / 6.0 * (ztemp[3] - 2.0 * ztemp[2] + ztemp[1]);
+        cd21y = 1.0 / 6.0 * (ztemp[4] - 2.0 * ztemp[3] + ztemp[2]);
+        cd40y =
+            1.0 / 120.0 * (ztemp[0] - 4.0 * ztemp[1] + 6.0 * ztemp[2] - 4.0 * ztemp[3] + ztemp[4]);
+        cd41y =
+            1.0 / 120.0 * (ztemp[1] - 4.0 * ztemp[2] + 6.0 * ztemp[3] - 4.0 * ztemp[4] + ztemp[5]);
 
         /* Interpolate in y */
-        zfit[i] = sy * (ztemp[3] + (sy2 - 1.0f) * (cd21y + (sy2 - 4.0f) * cd41y)) +
-                  ty * (ztemp[2] + (ty2 - 1.0f) * (cd20y + (ty2 - 4.0f) * cd40y));
+        zfit[i] = sy * (ztemp[3] + (sy2 - 1.0) * (cd21y + (sy2 - 4.0) * cd41y)) +
+                  ty * (ztemp[2] + (ty2 - 1.0) * (cd20y + (ty2 - 4.0) * cd40y));
 
         nxold = nx;
         nyold = ny;
@@ -259,9 +259,9 @@ ii_bipoly5(
 
 static int
 interpolate_nearest_neighbor(
-    const void *state, PyArrayObject *data, const float x, const float y,
+    const void *state, PyArrayObject *data, const double x, const double y,
     /* Output parameters */
-    float *value, struct driz_error_t *error)
+    double *value, struct driz_error_t *error)
 {
     /* Unused parameters: */
     (void) state;
@@ -292,16 +292,16 @@ interpolate_nearest_neighbor(
 
 static int
 interpolate_bilinear(
-    const void *state, PyArrayObject *data, const float x, const float y,
+    const void *state, PyArrayObject *data, const double x, const double y,
     /* Output parameters */
-    float *value, struct driz_error_t *error)
+    double *value, struct driz_error_t *error)
 {
     /* Unused parameters: */
     (void) state;
     (void) error;
 
     integer_t nx, ny;
-    float sx, tx, sy, ty, f00;
+    double sx, tx, sy, ty, f00;
     integer_t isize[2];
 
     get_dimensions(data, isize);
@@ -327,18 +327,18 @@ interpolate_bilinear(
             return 0;
         }
         /* Interpolate along Y-direction only */
-        sy = y - (float) ny;
-        *value = (1.0f - sy) * f00 + sy * get_pixel(data, nx, ny + 1);
+        sy = y - (double) ny;
+        *value = (1.0 - sy) * f00 + sy * get_pixel(data, nx, ny + 1);
     } else if (ny == (isize[1] - 1)) {
         /* Interpolate along X-direction only */
-        sx = x - (float) nx;
-        *value = (1.0f - sx) * f00 + sx * get_pixel(data, nx + 1, ny);
+        sx = x - (double) nx;
+        *value = (1.0 - sx) * f00 + sx * get_pixel(data, nx + 1, ny);
     } else {
         /* Bilinear - interpolation */
-        sx = x - (float) nx;
-        tx = 1.0f - sx;
-        sy = y - (float) ny;
-        ty = 1.0f - sy;
+        sx = x - (double) nx;
+        tx = 1.0 - sx;
+        sy = y - (double) ny;
+        ty = 1.0 - sy;
 
         *value = tx * ty * f00 + sx * ty * get_pixel(data, nx + 1, ny) +
                  sy * tx * get_pixel(data, nx, ny + 1) + sx * sy * get_pixel(data, nx + 1, ny + 1);
@@ -360,7 +360,7 @@ interpolate_bilinear(
  * edge so that the reflected pixel lies inside the image.
  */
 
-static inline_macro float
+static inline_macro double
 get_pixel_reflect_x(PyArrayObject *data, const integer_t isize[2], integer_t i, integer_t j)
 {
     const integer_t last = isize[0] - 1;
@@ -368,14 +368,14 @@ get_pixel_reflect_x(PyArrayObject *data, const integer_t isize[2], integer_t i, 
     assert(i > -isize[0] && i < 2 * isize[0] - 1);
 
     if (i < 0) {
-        return 2.0f * get_pixel(data, 0, j) - get_pixel(data, -i, j);
+        return 2.0 * get_pixel(data, 0, j) - get_pixel(data, -i, j);
     } else if (i > last) {
-        return 2.0f * get_pixel(data, last, j) - get_pixel(data, 2 * last - i, j);
+        return 2.0 * get_pixel(data, last, j) - get_pixel(data, 2 * last - i, j);
     }
     return get_pixel(data, i, j);
 }
 
-static inline_macro float
+static inline_macro double
 get_pixel_reflect(PyArrayObject *data, const integer_t isize[2], integer_t i, integer_t j)
 {
     const integer_t last = isize[1] - 1;
@@ -383,10 +383,10 @@ get_pixel_reflect(PyArrayObject *data, const integer_t isize[2], integer_t i, in
     assert(j > -isize[1] && j < 2 * isize[1] - 1);
 
     if (j < 0) {
-        return 2.0f * get_pixel_reflect_x(data, isize, i, 0) -
+        return 2.0 * get_pixel_reflect_x(data, isize, i, 0) -
                get_pixel_reflect_x(data, isize, i, -j);
     } else if (j > last) {
-        return 2.0f * get_pixel_reflect_x(data, isize, i, last) -
+        return 2.0 * get_pixel_reflect_x(data, isize, i, last) -
                get_pixel_reflect_x(data, isize, i, 2 * last - j);
     }
     return get_pixel_reflect_x(data, isize, i, j);
@@ -401,7 +401,7 @@ get_pixel_reflect(PyArrayObject *data, const integer_t isize[2], integer_t i, in
 static inline_macro void
 get_pixel_block(
     PyArrayObject *data, const integer_t isize[2], const integer_t i0, const integer_t j0,
-    const integer_t n, float *block /* [n][n] */)
+    const integer_t n, double *block /* [n][n] */)
 {
     integer_t row, col;
 
@@ -423,17 +423,17 @@ get_pixel_block(
 
 static int
 interpolate_poly3(
-    const void *state, PyArrayObject *data, const float x, const float y,
+    const void *state, PyArrayObject *data, const double x, const double y,
     /* Output parameters */
-    float *value, struct driz_error_t *error)
+    double *value, struct driz_error_t *error)
 {
     /* Unused parameters: */
     (void) state;
 
     integer_t nx, ny;
     const integer_t rowleh = 4;
-    float coeff[4][4];
-    float xval, yval;
+    double coeff[4][4];
+    double xval, yval;
     integer_t isize[2];
     get_dimensions(data, isize);
 
@@ -446,8 +446,8 @@ interpolate_poly3(
     /* The 4x4 block of pixels around (x, y), with (nx, ny) at coeff[1][1] */
     get_pixel_block(data, isize, nx - 1, ny - 1, 4, &coeff[0][0]);
 
-    xval = 2.0f + (x - (float) nx);
-    yval = 2.0f + (y - (float) ny);
+    xval = 2.0 + (x - (double) nx);
+    yval = 2.0 + (y - (double) ny);
 
     return ii_bipoly3(&coeff[0][0], rowleh, 0, 1, &xval, &yval, value, error);
 }
@@ -463,16 +463,16 @@ interpolate_poly3(
 
 static int
 interpolate_poly5(
-    const void *state, PyArrayObject *data, const float x, const float y,
+    const void *state, PyArrayObject *data, const double x, const double y,
     /* Output parameters */
-    float *value, struct driz_error_t *error)
+    double *value, struct driz_error_t *error)
 {
     (void) state;
 
     integer_t nx, ny;
     const integer_t rowleh = 6;
-    float coeff[6][6];
-    float xval, yval;
+    double coeff[6][6];
+    double xval, yval;
     integer_t isize[2];
     get_dimensions(data, isize);
 
@@ -485,8 +485,8 @@ interpolate_poly5(
     /* The 6x6 block of pixels around (x, y), with (nx, ny) at coeff[2][2] */
     get_pixel_block(data, isize, nx - 2, ny - 2, 6, &coeff[0][0]);
 
-    xval = 3.0f + (x - (float) nx);
-    yval = 3.0f + (y - (float) ny);
+    xval = 3.0 + (x - (double) nx);
+    yval = 3.0 + (y - (double) ny);
 
     return ii_bipoly5(&coeff[0][0], rowleh, 0, 1, &xval, &yval, value, error);
 }
@@ -504,9 +504,9 @@ interpolate_poly5(
 
 static int
 interpolate_lanczos(
-    const void *state, PyArrayObject *data, const float x, const float y,
+    const void *state, PyArrayObject *data, const double x, const double y,
     /* Output parameters */
-    float *value, struct driz_error_t *error)
+    double *value, struct driz_error_t *error)
 {
     /* Unused parameters: */
     (void) error;
@@ -514,7 +514,7 @@ interpolate_lanczos(
     integer_t ixs, iys, ixe, iye;
     size_t xoff, yoff;
     double luty, sum;
-    float nbox;
+    double nbox;
     integer_t i, j;
     const struct lanczos_param_t *lanczos = (const struct lanczos_param_t *) state;
     integer_t isize[2];
@@ -523,14 +523,14 @@ interpolate_lanczos(
     assert(state);
     INTERPOLATION_ASSERTS;
 
-    nbox = (float) lanczos->nbox;
+    nbox = (double) lanczos->nbox;
 
     /* First check for being close to the edge and, if so, return the
        missing value */
-    ixs = MAX((integer_t) floorf(x - nbox) + 1, 0);
-    ixe = MIN((integer_t) floorf(x + nbox), isize[0] - 1);
-    iys = MAX((integer_t) floorf(y - nbox) + 1, 0);
-    iye = MIN((integer_t) floorf(y + nbox), isize[1] - 1);
+    ixs = MAX((integer_t) floor(x - nbox) + 1, 0);
+    ixe = MIN((integer_t) floor(x + nbox), isize[0] - 1);
+    iys = MAX((integer_t) floor(y - nbox) + 1, 0);
+    iye = MIN((integer_t) floor(y + nbox), isize[1] - 1);
 
     /* Don't divide-by-zero errors */
     assert(lanczos->space != 0.0);
@@ -554,7 +554,7 @@ interpolate_lanczos(
         }
     }
 
-    *value = (float) sum;
+    *value = sum;
     return 0;
 }
 
@@ -580,7 +580,7 @@ doblot(struct driz_param_t *p)
     int order;
     size_t nlut;
     integer_t isize[2], osize[2];
-    float xo, yo, v, s;
+    double xo, yo, v, s;
     integer_t i, j;
     interp_function *interpolate;
     struct lanczos_param_t lanczos;
@@ -643,13 +643,13 @@ doblot(struct driz_param_t *p)
                 return 1;
             }
 
-            xo = (float) get_pixmap(p->pixmap, i, j)[0];
-            yo = (float) get_pixmap(p->pixmap, i, j)[1];
+            xo = get_pixmap(p->pixmap, i, j)[0];
+            yo = get_pixmap(p->pixmap, i, j)[1];
 
             /* Check it is on the input image; NaN means no mapping is
                defined for this output pixel and it is treated as missing */
-            if (!npy_isnan(xo) && !npy_isnan(yo) && xo >= 0.0 && xo < (float) isize[0] &&
-                yo >= 0.0 && yo < (float) isize[1]) {
+            if (!npy_isnan(xo) && !npy_isnan(yo) && xo >= 0.0 && xo < (double) isize[0] &&
+                yo >= 0.0 && yo < (double) isize[1]) {
                 /* Check for look-up-table interpolation */
                 if (interpolate(state, p->data, xo, yo, &v, p->error)) {
                     goto doblot_exit_;

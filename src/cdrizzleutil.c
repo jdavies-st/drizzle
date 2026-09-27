@@ -212,14 +212,14 @@ driz_param_init(struct driz_param_t *p)
     p->pixel_fraction = 1.0;
 
     /* Exposure time */
-    p->exposure_time = 1.0f;
+    p->exposure_time = 1.0;
 
     /* Weight scale */
-    p->weight_scale = 1.0f;
+    p->weight_scale = 1.0;
 
     /* Filling */
-    p->fill_value = 0.0f;
-    p->fill_value2 = 0.0f;
+    p->fill_value = 0.0;
+    p->fill_value2 = 0.0;
     p->do_fill = 0;
     p->do_fill2 = 0;
 
@@ -227,8 +227,8 @@ driz_param_init(struct driz_param_t *p)
     p->in_units = unit_counts;
     p->out_units = unit_counts;
 
-    p->iscale = 1.0f;
-    p->pscale_ratio = NPY_NANF; /* Scaling for kernel size. NaN */
+    p->iscale = 1.0;
+    p->pscale_ratio = NPY_NAN; /* Scaling for kernel size. NaN */
 
     /* Input data */
     p->data = NULL;

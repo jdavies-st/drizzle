@@ -29,7 +29,8 @@ dobox(struct driz_param_t *p);
 double
 compute_area(double is, double js, const double x[4], const double y[4]);
 int
-compute_pscale_ratio(struct driz_param_t *p, struct polygon *bounding_polygon, float *pscale_ratio);
+compute_pscale_ratio(
+    struct driz_param_t *p, struct polygon *bounding_polygon, double *pscale_ratio);
 
 double
 boxer(double is, double js, const double x[4], const double y[4]);

@@ -10,6 +10,14 @@ Release Notes
 - ``blot_image`` now fills output pixels whose ``pixmap`` entry contains NaN
   with ``fillval`` instead of raising an error. [#224]
 
+- The C code now computes in double precision; input and output arrays are
+  still float32. Drizzled images change at the level of float32 rounding and
+  no longer depend on whether the compiler merges multiplications and
+  additions into single steps, which made results differ slightly between
+  platforms. ``blot_image`` no longer rounds pixel map coordinates to
+  float32, which made it less accurate at large pixel coordinates (about
+  1e-4 pixel near x = 4000). The "turbo" kernel is about 15% slower.
+
 
 3.0.1 (unreleased)
 

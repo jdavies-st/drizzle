@@ -30,10 +30,6 @@
 #include "cdrizzleutil.h"
 #include "tests/drizzletest.h"
 
-#if defined(_MSC_VER) && (_MSC_VER < 1900)
-#define strtof(str, endptr) ((float) strtod((str), (endptr)))
-#endif
-
 FILE *driz_log_handle = NULL;
 
 /* Return 'obj' as an array of the given type that the C code can read
@@ -325,14 +321,14 @@ tdriz(PyObject *self, PyObject *args, PyObject *keywords)
     integer_t xmax = 0;
     integer_t ymin = 0;
     integer_t ymax = 0;
-    float iscale = 1.0f;
-    float pscale_ratio = NPY_NANF;
-    float scale = NPY_NANF;
+    double iscale = 1.0;
+    double pscale_ratio = NPY_NAN;
+    double scale = NPY_NAN;
     double pfract = 1.0;
     char *kernel_str = "square";
     char *inun_str = "cps";
-    float expin = 1.0;
-    float wtscl = 1.0;
+    double expin = 1.0;
+    double wtscl = 1.0;
     char *fillstr = "INDEF";
     char *fillstr2 = "INDEF";
 
@@ -349,7 +345,7 @@ tdriz(PyObject *self, PyObject *args, PyObject *keywords)
     enum e_unit_t inun;
     char *fillstr_end;
     bool_t do_fill, do_fill2;
-    float fill_value, fill_value2;
+    double fill_value, fill_value2;
     struct driz_error_t error;
     struct driz_param_t p;
     integer_t size[2];
@@ -364,24 +360,24 @@ tdriz(PyObject *self, PyObject *args, PyObject *keywords)
     driz_error_init(&error);
 
     if (!PyArg_ParseTupleAndKeywords(
-            args, keywords, "OOOOOO|OOOOiiiiifOOdssffss:tdriz", (char **) kwlist, &oimg, &owei,
+            args, keywords, "OOOOOO|OOOOiiiiidOOdssddss:tdriz", (char **) kwlist, &oimg, &owei,
             &pixmap, &oout, &owht, &ocon,        /* OOOOOO */
             &oimg2, &oout2, &odq, &ooutdq,       /* OOOO */
             &uniqid, &xmin, &xmax, &ymin, &ymax, /* iiiii */
-            &iscale, &opscale_ratio, &oscale,    /* fOO */
+            &iscale, &opscale_ratio, &oscale,    /* dOO */
             &pfract, &kernel_str, &inun_str,     /* dss */
-            &expin, &wtscl, &fillstr, &fillstr2) /* ffss */
+            &expin, &wtscl, &fillstr, &fillstr2) /* ddss */
     ) {
         return NULL;
     }
 
     if (oscale != NULL && oscale != Py_None) {
-        scale = (float) PyFloat_AsDouble(oscale);
+        scale = PyFloat_AsDouble(oscale);
         if (PyErr_Occurred()) {
             driz_error_set_message(&error, "Argument 'scale' is not a number.");
             goto _exit;
         }
-        if (scale <= 0.0f || !isfinite(scale)) {
+        if (scale <= 0.0 || !isfinite(scale)) {
             driz_error_set_message(&error, "Argument 'scale' must be positive and finite.");
             goto _exit;
         }
@@ -398,18 +394,18 @@ tdriz(PyObject *self, PyObject *args, PyObject *keywords)
         }
 
     } else {
-        if (iscale <= 0.0f || !isfinite(iscale)) {
+        if (iscale <= 0.0 || !isfinite(iscale)) {
             driz_error_set_message(&error, "Argument 'iscale' must be positive and finite.");
             goto _exit;
         }
 
         if (opscale_ratio != NULL && opscale_ratio != Py_None) {
-            pscale_ratio = (float) PyFloat_AsDouble(opscale_ratio);
+            pscale_ratio = PyFloat_AsDouble(opscale_ratio);
             if (PyErr_Occurred()) {
                 driz_error_set_message(&error, "Argument 'pscale_ratio' is not a number.");
                 goto _exit;
             }
-            if (pscale_ratio <= 0.0f || !isfinite(pscale_ratio)) {
+            if (pscale_ratio <= 0.0 || !isfinite(pscale_ratio)) {
                 driz_error_set_message(
                     &error, "Argument 'pscale_ratio' must be positive and finite.");
                 goto _exit;
@@ -486,11 +482,11 @@ tdriz(PyObject *self, PyObject *args, PyObject *keywords)
 
     } else if (strncmp(fillstr, "NaN", 4) == 0 || strncmp(fillstr, "nan", 4) == 0) {
         do_fill = 1;
-        fill_value = NPY_NANF;
+        fill_value = NPY_NAN;
 
     } else {
         do_fill = 1;
-        fill_value = strtof(fillstr, &fillstr_end);
+        fill_value = strtod(fillstr, &fillstr_end);
         if (fillstr == fillstr_end || *fillstr_end != '\0') {
             driz_error_set_message(&error, "Illegal fill value");
             goto _exit;
@@ -500,15 +496,15 @@ tdriz(PyObject *self, PyObject *args, PyObject *keywords)
     if (fillstr2 == NULL || *fillstr2 == 0 || strncmp(fillstr2, "INDEF", 6) == 0 ||
         strncmp(fillstr2, "indef", 6) == 0) {
         do_fill2 = 0;
-        fill_value2 = 0.0f;
+        fill_value2 = 0.0;
 
     } else if (strncmp(fillstr2, "NaN", 4) == 0 || strncmp(fillstr2, "nan", 4) == 0) {
         do_fill2 = 1;
-        fill_value2 = NPY_NANF;
+        fill_value2 = NPY_NAN;
 
     } else {
         do_fill2 = 1;
-        fill_value2 = strtof(fillstr2, &fillstr_end);
+        fill_value2 = strtod(fillstr2, &fillstr_end);
         if (fillstr2 == fillstr_end || *fillstr_end != '\0') {
             driz_error_set_message(&error, "Illegal fill value");
             goto _exit;
@@ -732,10 +728,10 @@ tdriz(PyObject *self, PyObject *args, PyObject *keywords)
     if (driz_error_check(&error, "ymax must be > ymin", p.ymax > p.ymin)) {
         goto _exit;
     }
-    if (driz_error_check(&error, "exposure time must be > 0", p.exposure_time > 0.0f)) {
+    if (driz_error_check(&error, "exposure time must be > 0", p.exposure_time > 0.0)) {
         goto _exit;
     }
-    if (driz_error_check(&error, "weight scale must be > 0", p.weight_scale > 0.0f)) {
+    if (driz_error_check(&error, "weight scale must be > 0", p.weight_scale > 0.0)) {
         goto _exit;
     }
 
@@ -816,11 +812,11 @@ tblot(PyObject *self, PyObject *args, PyObject *keywords)
     long xmax = 0;
     long ymin = 0;
     long ymax = 0;
-    float scale = 1.0f;
-    float iscale = 1.0f;
+    double scale = 1.0;
+    double iscale = 1.0;
     char *interp_str = "poly5";
-    float ef = 1.0f;
-    float fillval;
+    double ef = 1.0;
+    double fillval;
 
     PyArrayObject *img = NULL, *out = NULL, *map = NULL;
     enum e_interp_t interp;
@@ -846,18 +842,18 @@ tblot(PyObject *self, PyObject *args, PyObject *keywords)
     }
 
     if (oscale != NULL && !Py_IsNone(oscale)) {
-        scale = (float) PyFloat_AsDouble(oscale);
+        scale = PyFloat_AsDouble(oscale);
 
         if (PyErr_Occurred()) {
             driz_error_set_message(&error, "Argument 'scale' is not a number.");
             goto _exit;
         }
 
-        if (scale <= 0.0f || !isfinite(scale)) {
+        if (scale <= 0.0 || !isfinite(scale)) {
             driz_error_set_message(&error, "Argument 'scale' must be positive and finite.");
             goto _exit;
         }
-        iscale = 1.0f / (scale * scale);
+        iscale = 1.0 / (scale * scale);
 
         if (py_warning(
                 PyExc_DeprecationWarning, "Argument 'scale' is deprecated, use 'iscale' "
@@ -867,16 +863,16 @@ tblot(PyObject *self, PyObject *args, PyObject *keywords)
 
     } else {
         if (oiscale == NULL || Py_IsNone(oiscale)) {
-            iscale = 1.0f;
+            iscale = 1.0;
         } else {
-            iscale = (float) PyFloat_AsDouble(oiscale);
+            iscale = PyFloat_AsDouble(oiscale);
 
             if (PyErr_Occurred()) {
                 driz_error_set_message(&error, "Argument 'iscale' is not a number.");
                 goto _exit;
             }
         }
-        if (iscale <= 0.0f || !isfinite(iscale)) {
+        if (iscale <= 0.0 || !isfinite(iscale)) {
             driz_error_set_message(&error, "Argument 'iscale' must be positive and finite.");
             goto _exit;
         }
@@ -900,7 +896,7 @@ tblot(PyObject *self, PyObject *args, PyObject *keywords)
             goto _exit;
         }
 
-        fillval = (float) PyFloat_AsDouble(omisval);
+        fillval = PyFloat_AsDouble(omisval);
 
         if (ofillval != NULL && !Py_IsNone(ofillval)) {
             driz_error_set_message(
@@ -909,14 +905,14 @@ tblot(PyObject *self, PyObject *args, PyObject *keywords)
         }
     } else {
         if (ofillval != NULL && !Py_IsNone(ofillval)) {
-            fillval = (float) PyFloat_AsDouble(ofillval);
+            fillval = PyFloat_AsDouble(ofillval);
 
             if (PyErr_Occurred()) {
                 driz_error_set_message(&error, "Argument 'fillval' is not a number.");
                 goto _exit;
             }
         } else {
-            fillval = 0.0f;
+            fillval = 0.0;
         }
     }
 
@@ -928,18 +924,18 @@ tblot(PyObject *self, PyObject *args, PyObject *keywords)
             goto _exit;
         }
 
-        ef = (float) PyFloat_AsDouble(oef);
+        ef = PyFloat_AsDouble(oef);
 
         if (PyErr_Occurred()) {
             driz_error_set_message(&error, "Argument 'exptime' is not a number.");
             goto _exit;
         }
-        if (ef <= 0.0f || !isfinite(ef)) {
+        if (ef <= 0.0 || !isfinite(ef)) {
             driz_error_set_message(&error, "Argument 'exptime' must be positive and finite.");
             goto _exit;
         }
     } else {
-        ef = 1.0f;
+        ef = 1.0;
     }
 
     img = ensure_array(oimg, NPY_FLOAT, 2, 2, &free_img);

@@ -491,16 +491,22 @@ def test_zero_input_weight(kernel):
     assert np.sum(np.abs(outsci[(outwht == 0)])) == 0.0
 
 
+# The reference images were made with pixel map coordinates rounded to
+# float32, which places a point near x = 4000 only to about 1e-4 pixel, so
+# "poly5" star positions differ from them by up to that. "lanczos3" and
+# "lanczos5" look up their weights in a table with a spacing of 0.003 pixel,
+# so a star whose coordinates lie close to a table step moves by up to one
+# step, while the median does not change.
 @pytest.mark.parametrize(
-    "interpolator,test_image_type",
+    "interpolator,test_image_type,med_diff_atol,max_diff_atol",
     [
-        ("poly5", "point"),
-        ("default", "grid"),
-        ("lanczos3", "grid"),
-        ("lanczos5", "grid"),
+        ("poly5", "point", 1.0e-4, 1.0e-4),
+        ("default", "grid", 1.0e-4, 1.0e-4),
+        ("lanczos3", "grid", 1.0e-6, 3.0e-3),
+        ("lanczos5", "grid", 1.0e-6, 3.0e-3),
     ],
 )
-def test_blot_interpolation(tmpdir, interpolator, test_image_type):
+def test_blot_interpolation(tmpdir, interpolator, test_image_type, med_diff_atol, max_diff_atol):
     """
     Test do_driz square kernel with point
     """
@@ -539,8 +545,8 @@ def test_blot_interpolation(tmpdir, interpolator, test_image_type):
         20.0,
         16,
     )
-    assert med_diff < 1.0e-6
-    assert max_diff < 1.0e-5
+    assert med_diff < med_diff_atol
+    assert max_diff < max_diff_atol
 
 
 @pytest.mark.parametrize("interp", ["poly3", "poly5"])
@@ -602,6 +608,24 @@ def test_blot_nan_pixmap(interp, nan_axis):
     mask[3, 4] = False
     # lanczos does not reproduce a constant image exactly
     np.testing.assert_allclose(blotted[mask], 1.0, rtol=5e-3)
+
+
+def test_blot_pixmap_coordinates_in_double_precision():
+    """
+    blot_image reproduces a linear ramp at pixel map coordinates near x = 4000
+    to within float32 rounding of the output values. Pixel map coordinates
+    used to be rounded to float32, which is only good to about 1e-4 pixel
+    there.
+    """
+    # a ramp that is zero at x = 4000, so that the output values there are
+    # small and float32 stores them precisely
+    data = np.tile(np.arange(4096, dtype=np.float32) - 4000, (8, 1))
+    x = 4000 + np.linspace(0.0, 0.99, 100)
+    pixmap = np.dstack([x[None, :], np.full((1, 100), 3.0)])
+
+    blotted = resample.blot_image(data, pixmap=pixmap, interp="linear")
+
+    np.testing.assert_allclose(blotted[0], x - 4000, rtol=0, atol=1e-6)
 
 
 def test_context_planes():
