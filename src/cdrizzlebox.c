@@ -20,14 +20,17 @@
 static const double lut_delta = 0.003; /* spacing of Lanczos LUT */
 
 /** ---------------------------------------------------------------------------
- * The output weights are stored as float32. A weight that is too small to be
- * stored there would be recorded as zero, leaving an output pixel with a value
- * and context but no weight, so such a weight is treated as zero.
+ * A weight that is too small to be stored in float32 output weights would be
+ * recorded there as zero, leaving an output pixel with a value and context but
+ * no weight, so such a weight is treated as zero.
  */
 static inline_macro double
-storable_weight(const double weight)
+storable_weight(const struct driz_param_t *p, const double weight)
 {
-    return ((float) weight == 0.0f) ? 0.0 : weight;
+    if (p->output_counts_image.itemsize == sizeof(float) && (float) weight == 0.0f) {
+        return 0.0;
+    }
+    return weight;
 }
 
 /** ---------------------------------------------------------------------------
@@ -40,10 +43,10 @@ storable_weight(const double weight)
  * dow: new contribution to weighted counts
  */
 
-inline_macro static int
-update_data(
+static always_inline_macro int
+update_data_as(
     struct driz_param_t *p, const integer_t ii, const integer_t jj, const double d,
-    const double dow)
+    const double dow, const enum image_types types)
 {
     double vc_plus_dow;
     double vc;
@@ -53,7 +56,7 @@ update_data(
     }
 
     // get previous output image weight:
-    vc = get_pixel(p->output_counts, ii, jj);
+    vc = image_get_as(&p->output_counts_image, ii, jj, types);
 
     vc_plus_dow = vc + dow;
 
@@ -62,7 +65,7 @@ update_data(
             driz_error_format_message(p->error, "OOB in output_data[%d,%d]", ii, jj);
             return 1;
         } else {
-            set_pixel(p->output_data, ii, jj, d);
+            image_set_as(&p->output_data_image, ii, jj, d, types);
         }
 
     } else {
@@ -71,8 +74,9 @@ update_data(
             return 1;
         } else {
             double value;
-            value = (get_pixel(p->output_data, ii, jj) * vc + dow * d) / (vc_plus_dow);
-            set_pixel(p->output_data, ii, jj, value);
+            value =
+                (image_get_as(&p->output_data_image, ii, jj, types) * vc + dow * d) / (vc_plus_dow);
+            image_set_as(&p->output_data_image, ii, jj, value, types);
         }
     }
 
@@ -80,10 +84,26 @@ update_data(
         driz_error_format_message(p->error, "OOB in output_counts[%d,%d]", ii, jj);
         return 1;
     } else {
-        set_pixel(p->output_counts, ii, jj, vc_plus_dow);
+        image_set_as(&p->output_counts_image, ii, jj, vc_plus_dow, types);
     }
 
     return 0;
+}
+
+/* update_data_as() compiled for each combination of output image types */
+inline_macro static int
+update_data(
+    struct driz_param_t *p, const integer_t ii, const integer_t jj, const double d,
+    const double dow)
+{
+    switch (p->output_types) {
+        case images_float32:
+            return update_data_as(p, ii, jj, d, dow, images_float32);
+        case images_float64:
+            return update_data_as(p, ii, jj, d, dow, images_float64);
+        default:
+            return update_data_as(p, ii, jj, d, dow, images_mixed);
+    }
 }
 
 /** ---------------------------------------------------------------------------
@@ -99,17 +119,16 @@ update_data(
  * d2:  array of data2 values that need to be co-added using squared weights
  *      (i.e., variance arrays)
  */
-inline_macro static int
-update_data_var(
+static always_inline_macro int
+update_data_var_as(
     struct driz_param_t *p, const integer_t ii, const integer_t jj, const double d,
-    const double dow, double *d2, unsigned int dq)
+    const double dow, double *d2, unsigned int dq, const enum image_types types)
 {
     double vc_plus_dow, vc_plus_dow2;
     double v, vc2, dow2;
     double vc;
     int i;
     int output_dq_value;
-    PyArrayObject **arr2;
 
     if (oob_output_pixel(p, ii, jj)) {
         driz_error_format_message(p->error, "OOB in accessing output data [%d,%d]", ii, jj);
@@ -121,31 +140,32 @@ update_data_var(
     }
 
     // get previous output image weight:
-    vc = get_pixel(p->output_counts, ii, jj);
+    vc = image_get_as(&p->output_counts_image, ii, jj, types);
 
     // new output image weight:
     vc_plus_dow = vc + dow;
 
     if (vc == 0.0) {
-        set_pixel(p->output_data, ii, jj, d);
-        if (d2 && (arr2 = p->output_data2)) {
+        image_set_as(&p->output_data_image, ii, jj, d, types);
+        if (d2 && p->output_data2) {
             for (i = 0; i < p->ndata2; ++i) {
-                set_pixel(arr2[i], ii, jj, d2[i]);
+                image_set_as(&p->output_data2_images[i], ii, jj, d2[i], types);
             }
         }
         if (p->dq) {
             set_uint_pixel(p->output_dq, ii, jj, dq);
         }
     } else {
-        v = (get_pixel(p->output_data, ii, jj) * vc + dow * d) / vc_plus_dow;
-        set_pixel(p->output_data, ii, jj, v);
-        if (d2 && (arr2 = p->output_data2)) {
+        v = (image_get_as(&p->output_data_image, ii, jj, types) * vc + dow * d) / vc_plus_dow;
+        image_set_as(&p->output_data_image, ii, jj, v, types);
+        if (d2 && p->output_data2) {
             dow2 = dow * dow;
             vc2 = vc * vc;
             vc_plus_dow2 = vc_plus_dow * vc_plus_dow;
             for (i = 0; i < p->ndata2; ++i) {
-                v = (get_pixel(arr2[i], ii, jj) * vc2 + dow2 * d2[i]) / vc_plus_dow2;
-                set_pixel(arr2[i], ii, jj, v);
+                v = (image_get_as(&p->output_data2_images[i], ii, jj, types) * vc2 + dow2 * d2[i]) /
+                    vc_plus_dow2;
+                image_set_as(&p->output_data2_images[i], ii, jj, v, types);
             }
         }
         if (p->dq) {
@@ -153,9 +173,25 @@ update_data_var(
             set_uint_pixel(p->output_dq, ii, jj, output_dq_value | dq);
         }
     }
-    set_pixel(p->output_counts, ii, jj, vc_plus_dow);
+    image_set_as(&p->output_counts_image, ii, jj, vc_plus_dow, types);
 
     return 0;
+}
+
+/* update_data_var_as() compiled for each combination of output image types */
+inline_macro static int
+update_data_var(
+    struct driz_param_t *p, const integer_t ii, const integer_t jj, const double d,
+    const double dow, double *d2, unsigned int dq)
+{
+    switch (p->output_types) {
+        case images_float32:
+            return update_data_var_as(p, ii, jj, d, dow, d2, dq, images_float32);
+        case images_float64:
+            return update_data_var_as(p, ii, jj, d, dow, d2, dq, images_float64);
+        default:
+            return update_data_var_as(p, ii, jj, d, dow, d2, dq, images_mixed);
+    }
 }
 
 /** ---------------------------------------------------------------------------
@@ -649,10 +685,10 @@ do_kernel_point_var(struct driz_param_t *p)
 
                 } else {
                     /* Allow for stretching because of scale change */
-                    d = get_pixel(p->data, i, j) * p->iscale;
+                    d = image_get(&p->data_image, i, j) * p->iscale;
                     for (k = 0; k < ndata2; ++k) {
                         if (p->data2[k]) {
-                            d2[k] = get_pixel(p->data2[k], i, j) * iscale2;
+                            d2[k] = image_get(&p->data2_images[k], i, j) * iscale2;
                         } else {
                             d2[k] = 0.0;
                         }
@@ -662,7 +698,8 @@ do_kernel_point_var(struct driz_param_t *p)
                        that we DON'T scale by the Jacobian as it hasn't been
                        calculated */
                     if (p->weights) {
-                        dow = storable_weight(get_pixel(p->weights, i, j) * p->weight_scale);
+                        dow = storable_weight(
+                            p, image_get(&p->weights_image, i, j) * p->weight_scale);
                     } else {
                         dow = 1.0;
                     }
@@ -807,10 +844,10 @@ do_kernel_gaussian_var(struct driz_param_t *p)
                 nhit = 0;
 
                 /* Allow for stretching because of scale change */
-                d = get_pixel(p->data, i, j) * p->iscale;
+                d = image_get(&p->data_image, i, j) * p->iscale;
                 for (k = 0; k < ndata2; ++k) {
                     if (p->data2[k]) {
-                        d2[k] = get_pixel(p->data2[k], i, j) * iscale2;
+                        d2[k] = image_get(&p->data2_images[k], i, j) * iscale2;
                     } else {
                         d2[k] = 0.0;
                     }
@@ -821,7 +858,7 @@ do_kernel_gaussian_var(struct driz_param_t *p)
                    weight in the output
                  */
                 if (p->weights) {
-                    w = get_pixel(p->weights, i, j) * p->weight_scale;
+                    w = image_get(&p->weights_image, i, j) * p->weight_scale;
                 } else {
                     w = 1.0;
                 }
@@ -841,7 +878,7 @@ do_kernel_gaussian_var(struct driz_param_t *p)
                         /* Count the hits */
                         ++nhit;
 
-                        dow = storable_weight(dover * w);
+                        dow = storable_weight(p, dover * w);
 
                         /* If we are creating or modifying the context
                            image, we do so here. */
@@ -1000,10 +1037,10 @@ do_kernel_lanczos_var(struct driz_param_t *p)
                 nhit = 0;
 
                 /* Allow for stretching because of scale change */
-                d = get_pixel(p->data, i, j) * p->iscale;
+                d = image_get(&p->data_image, i, j) * p->iscale;
                 for (k = 0; k < ndata2; ++k) {
                     if (p->data2[k]) {
-                        d2[k] = get_pixel(p->data2[k], i, j) * iscale2;
+                        d2[k] = image_get(&p->data2_images[k], i, j) * iscale2;
                     } else {
                         d2[k] = 0.0;
                     }
@@ -1014,7 +1051,7 @@ do_kernel_lanczos_var(struct driz_param_t *p)
                    weight in the output
                  */
                 if (p->weights) {
-                    w = get_pixel(p->weights, i, j) * p->weight_scale;
+                    w = image_get(&p->weights_image, i, j) * p->weight_scale;
                 } else {
                     w = 1.0;
                 }
@@ -1037,7 +1074,7 @@ do_kernel_lanczos_var(struct driz_param_t *p)
                          * Y */
                         dover = lut[ix] * lut[iy];
 
-                        dow = storable_weight(dover * w);
+                        dow = storable_weight(p, dover * w);
 
                         /* If we are creating or modifying the context
                            image, we do so here. */
@@ -1185,10 +1222,10 @@ do_kernel_turbo_var(struct driz_param_t *p)
                 nhit = 0;
 
                 /* Allow for stretching because of scale change */
-                d = get_pixel(p->data, i, j) * p->iscale;
+                d = image_get(&p->data_image, i, j) * p->iscale;
                 for (k = 0; k < ndata2; ++k) {
                     if (p->data2[k]) {
-                        d2[k] = get_pixel(p->data2[k], i, j) * iscale2;
+                        d2[k] = image_get(&p->data2_images[k], i, j) * iscale2;
                     } else {
                         d2[k] = 0.0;
                     }
@@ -1199,7 +1236,7 @@ do_kernel_turbo_var(struct driz_param_t *p)
                    weight in the output.
                  */
                 if (p->weights) {
-                    w = get_pixel(p->weights, i, j) * p->weight_scale;
+                    w = image_get(&p->weights_image, i, j) * p->weight_scale;
                 } else {
                     w = 1.0;
                 }
@@ -1218,7 +1255,7 @@ do_kernel_turbo_var(struct driz_param_t *p)
                             /* Count the hits */
                             ++nhit;
 
-                            dow = storable_weight(dover * w);
+                            dow = storable_weight(p, dover * w);
 
                             /* If we are creating or modifying the context
                                image, we do so here. */
@@ -1389,10 +1426,10 @@ do_kernel_square_var(struct driz_param_t *p)
                           (xout[0] - xout[2]) * (yout[1] - yout[3]));
 
             /* Allow for stretching because of scale change */
-            d = get_pixel(p->data, i, j) * p->iscale;
+            d = image_get(&p->data_image, i, j) * p->iscale;
             for (k = 0; k < ndata2; ++k) {
                 if (p->data2[k]) {
-                    d2[k] = get_pixel(p->data2[k], i, j) * iscale2;
+                    d2[k] = image_get(&p->data2_images[k], i, j) * iscale2;
                 } else {
                     d2[k] = 0.0;
                 }
@@ -1402,7 +1439,7 @@ do_kernel_square_var(struct driz_param_t *p)
                the Jacobian to ensure conservation of weight in the output
              */
             if (p->weights) {
-                w = get_pixel(p->weights, i, j) * p->weight_scale / jaco;
+                w = image_get(&p->weights_image, i, j) * p->weight_scale / jaco;
             } else {
                 w = 1.0 / jaco;
             }
@@ -1423,7 +1460,7 @@ do_kernel_square_var(struct driz_param_t *p)
                     /* Could be positive or negative, depending on the sign
                      * of jaco */
                     if (dover != 0.0) {
-                        dow = storable_weight(dover * w);
+                        dow = storable_weight(p, dover * w);
 
                         /* Count the hits */
                         ++nhit;
@@ -1522,13 +1559,14 @@ do_kernel_point(struct driz_param_t *p)
 
                 } else {
                     /* Allow for stretching because of scale change */
-                    d = get_pixel(p->data, i, j) * p->iscale;
+                    d = image_get(&p->data_image, i, j) * p->iscale;
 
                     /* Scale the weighting mask by the scale factor.  Note
                        that we DON'T scale by the Jacobian as it hasn't been
                        calculated */
                     if (p->weights) {
-                        dow = storable_weight(get_pixel(p->weights, i, j) * p->weight_scale);
+                        dow = storable_weight(
+                            p, image_get(&p->weights_image, i, j) * p->weight_scale);
                     } else {
                         dow = 1.0;
                     }
@@ -1637,14 +1675,14 @@ do_kernel_gaussian(struct driz_param_t *p)
                 nhit = 0;
 
                 /* Allow for stretching because of scale change */
-                d = get_pixel(p->data, i, j) * p->iscale;
+                d = image_get(&p->data_image, i, j) * p->iscale;
 
                 /* Scale the weighting mask by the scale factor and
                    inversely by the Jacobian to ensure conservation of
                    weight in the output
                  */
                 if (p->weights) {
-                    w = get_pixel(p->weights, i, j) * p->weight_scale;
+                    w = image_get(&p->weights_image, i, j) * p->weight_scale;
                 } else {
                     w = 1.0;
                 }
@@ -1664,7 +1702,7 @@ do_kernel_gaussian(struct driz_param_t *p)
                         /* Count the hits */
                         ++nhit;
 
-                        dow = storable_weight(dover * w);
+                        dow = storable_weight(p, dover * w);
 
                         /* If we are creating or modifying the context
                            image, we do so here. */
@@ -1784,14 +1822,14 @@ do_kernel_lanczos(struct driz_param_t *p)
                 nhit = 0;
 
                 /* Allow for stretching because of scale change */
-                d = get_pixel(p->data, i, j) * p->iscale;
+                d = image_get(&p->data_image, i, j) * p->iscale;
 
                 /* Scale the weighting mask by the scale factor and
                    inversely by the Jacobian to ensure conservation of
                    weight in the output
                  */
                 if (p->weights) {
-                    w = get_pixel(p->weights, i, j) * p->weight_scale;
+                    w = image_get(&p->weights_image, i, j) * p->weight_scale;
                 } else {
                     w = 1.0;
                 }
@@ -1814,7 +1852,7 @@ do_kernel_lanczos(struct driz_param_t *p)
                          * Y */
                         dover = lut[ix] * lut[iy];
 
-                        dow = storable_weight(dover * w);
+                        dow = storable_weight(p, dover * w);
 
                         /* If we are creating or modifying the context
                            image, we do so here. */
@@ -1927,14 +1965,14 @@ do_kernel_turbo(struct driz_param_t *p)
                 nhit = 0;
 
                 /* Allow for stretching because of scale change */
-                d = get_pixel(p->data, i, j) * p->iscale;
+                d = image_get(&p->data_image, i, j) * p->iscale;
 
                 /* Scale the weighting mask by the scale factor and
                    inversely by the Jacobian to ensure conservation of
                    weight in the output.
                  */
                 if (p->weights) {
-                    w = get_pixel(p->weights, i, j) * p->weight_scale;
+                    w = image_get(&p->weights_image, i, j) * p->weight_scale;
                 } else {
                     w = 1.0;
                 }
@@ -1953,7 +1991,7 @@ do_kernel_turbo(struct driz_param_t *p)
                             /* Count the hits */
                             ++nhit;
 
-                            dow = storable_weight(dover * w);
+                            dow = storable_weight(p, dover * w);
 
                             /* If we are creating or modifying the context
                                image, we do so here. */
@@ -2089,13 +2127,13 @@ do_kernel_square(struct driz_param_t *p)
                           (xout[0] - xout[2]) * (yout[1] - yout[3]));
 
             /* Allow for stretching because of scale change */
-            d = get_pixel(p->data, i, j) * p->iscale;
+            d = image_get(&p->data_image, i, j) * p->iscale;
 
             /* Scale the weighting mask by the scale factor and inversely by
                the Jacobian to ensure conservation of weight in the output
              */
             if (p->weights) {
-                w = get_pixel(p->weights, i, j) * p->weight_scale / jaco;
+                w = image_get(&p->weights_image, i, j) * p->weight_scale / jaco;
             } else {
                 w = 1.0 / jaco;
             }
@@ -2116,7 +2154,7 @@ do_kernel_square(struct driz_param_t *p)
                     /* Could be positive or negative, depending on the sign
                      * of jaco */
                     if (dover != 0.0) {
-                        dow = storable_weight(dover * w);
+                        dow = storable_weight(p, dover * w);
 
                         /* Count the hits */
                         ++nhit;

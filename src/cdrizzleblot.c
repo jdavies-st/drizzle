@@ -34,7 +34,7 @@ static const double lut_delta = 0.003; /* spacing of Lanczos LUT */
  */
 
 typedef int(interp_function)(
-    const void *, PyArrayObject *, const double, const double,
+    const void *, const struct image *, const double, const double,
     /* Output parameters */
     double *, struct driz_error_t *);
 
@@ -259,7 +259,7 @@ ii_bipoly5(
 
 static int
 interpolate_nearest_neighbor(
-    const void *state, PyArrayObject *data, const double x, const double y,
+    const void *state, const struct image *data, const double x, const double y,
     /* Output parameters */
     double *value, struct driz_error_t *error)
 {
@@ -268,14 +268,15 @@ interpolate_nearest_neighbor(
     (void) error;
 
     integer_t isize[2];
-    get_dimensions(data, isize);
+    isize[0] = data->size[0];
+    isize[1] = data->size[1];
 
     assert(state == NULL);
     INTERPOLATION_ASSERTS;
 
     /* Points in the outer half of the last row or column round up to one
        past the end of the image, so clamp them to the last pixel. */
-    *value = get_pixel(
+    *value = image_get(
         data, CLAMP_BELOW((integer_t) (x + 0.5), isize[0] - 1),
         CLAMP_BELOW((integer_t) (y + 0.5), isize[1] - 1));
     return 0;
@@ -292,7 +293,7 @@ interpolate_nearest_neighbor(
 
 static int
 interpolate_bilinear(
-    const void *state, PyArrayObject *data, const double x, const double y,
+    const void *state, const struct image *data, const double x, const double y,
     /* Output parameters */
     double *value, struct driz_error_t *error)
 {
@@ -304,7 +305,8 @@ interpolate_bilinear(
     double sx, tx, sy, ty, f00;
     integer_t isize[2];
 
-    get_dimensions(data, isize);
+    isize[0] = data->size[0];
+    isize[1] = data->size[1];
 
     assert(state == NULL);
     INTERPOLATION_ASSERTS;
@@ -317,7 +319,7 @@ interpolate_bilinear(
         return 1;
     }
 
-    f00 = get_pixel(data, nx, ny);
+    f00 = image_get(data, nx, ny);
 
     if (nx == (isize[0] - 1)) {
         if (ny == (isize[1] - 1)) {
@@ -328,11 +330,11 @@ interpolate_bilinear(
         }
         /* Interpolate along Y-direction only */
         sy = y - (double) ny;
-        *value = (1.0 - sy) * f00 + sy * get_pixel(data, nx, ny + 1);
+        *value = (1.0 - sy) * f00 + sy * image_get(data, nx, ny + 1);
     } else if (ny == (isize[1] - 1)) {
         /* Interpolate along X-direction only */
         sx = x - (double) nx;
-        *value = (1.0 - sx) * f00 + sx * get_pixel(data, nx + 1, ny);
+        *value = (1.0 - sx) * f00 + sx * image_get(data, nx + 1, ny);
     } else {
         /* Bilinear - interpolation */
         sx = x - (double) nx;
@@ -340,8 +342,8 @@ interpolate_bilinear(
         sy = y - (double) ny;
         ty = 1.0 - sy;
 
-        *value = tx * ty * f00 + sx * ty * get_pixel(data, nx + 1, ny) +
-                 sy * tx * get_pixel(data, nx, ny + 1) + sx * sy * get_pixel(data, nx + 1, ny + 1);
+        *value = tx * ty * f00 + sx * ty * image_get(data, nx + 1, ny) +
+                 sy * tx * image_get(data, nx, ny + 1) + sx * sy * image_get(data, nx + 1, ny + 1);
     }
 
     return 0;
@@ -360,36 +362,41 @@ interpolate_bilinear(
  * edge so that the reflected pixel lies inside the image.
  */
 
-static inline_macro double
-get_pixel_reflect_x(PyArrayObject *data, const integer_t isize[2], integer_t i, integer_t j)
+static always_inline_macro double
+get_pixel_reflect_x(
+    const struct image *data, const integer_t isize[2], integer_t i, integer_t j,
+    const enum image_types types)
 {
     const integer_t last = isize[0] - 1;
 
     assert(i > -isize[0] && i < 2 * isize[0] - 1);
 
     if (i < 0) {
-        return 2.0 * get_pixel(data, 0, j) - get_pixel(data, -i, j);
+        return 2.0 * image_get_as(data, 0, j, types) - image_get_as(data, -i, j, types);
     } else if (i > last) {
-        return 2.0 * get_pixel(data, last, j) - get_pixel(data, 2 * last - i, j);
+        return 2.0 * image_get_as(data, last, j, types) -
+               image_get_as(data, 2 * last - i, j, types);
     }
-    return get_pixel(data, i, j);
+    return image_get_as(data, i, j, types);
 }
 
-static inline_macro double
-get_pixel_reflect(PyArrayObject *data, const integer_t isize[2], integer_t i, integer_t j)
+static always_inline_macro double
+get_pixel_reflect(
+    const struct image *data, const integer_t isize[2], integer_t i, integer_t j,
+    const enum image_types types)
 {
     const integer_t last = isize[1] - 1;
 
     assert(j > -isize[1] && j < 2 * isize[1] - 1);
 
     if (j < 0) {
-        return 2.0 * get_pixel_reflect_x(data, isize, i, 0) -
-               get_pixel_reflect_x(data, isize, i, -j);
+        return 2.0 * get_pixel_reflect_x(data, isize, i, 0, types) -
+               get_pixel_reflect_x(data, isize, i, -j, types);
     } else if (j > last) {
-        return 2.0 * get_pixel_reflect_x(data, isize, i, last) -
-               get_pixel_reflect_x(data, isize, i, 2 * last - j);
+        return 2.0 * get_pixel_reflect_x(data, isize, i, last, types) -
+               get_pixel_reflect_x(data, isize, i, 2 * last - j, types);
     }
-    return get_pixel_reflect_x(data, isize, i, j);
+    return get_pixel_reflect_x(data, isize, i, j, types);
 }
 
 /** ---------------------------------------------------------------------------
@@ -398,17 +405,30 @@ get_pixel_reflect(PyArrayObject *data, const integer_t isize[2], integer_t i, in
  * edges where the block extends beyond them.
  */
 
-static inline_macro void
-get_pixel_block(
-    PyArrayObject *data, const integer_t isize[2], const integer_t i0, const integer_t j0,
-    const integer_t n, double *block /* [n][n] */)
+static always_inline_macro void
+get_pixel_block_as(
+    const struct image *data, const integer_t isize[2], const integer_t i0, const integer_t j0,
+    const integer_t n, double *block /* [n][n] */, const enum image_types types)
 {
     integer_t row, col;
 
     for (row = 0; row < n; ++row) {
         for (col = 0; col < n; ++col) {
-            block[row * n + col] = get_pixel_reflect(data, isize, i0 + col, j0 + row);
+            block[row * n + col] = get_pixel_reflect(data, isize, i0 + col, j0 + row, types);
         }
+    }
+}
+
+/* get_pixel_block_as() with the type of the image checked once per block */
+static inline_macro void
+get_pixel_block(
+    const struct image *data, const integer_t isize[2], const integer_t i0, const integer_t j0,
+    const integer_t n, double *block /* [n][n] */)
+{
+    if (data->itemsize == sizeof(double)) {
+        get_pixel_block_as(data, isize, i0, j0, n, block, images_float64);
+    } else {
+        get_pixel_block_as(data, isize, i0, j0, n, block, images_float32);
     }
 }
 
@@ -423,7 +443,7 @@ get_pixel_block(
 
 static int
 interpolate_poly3(
-    const void *state, PyArrayObject *data, const double x, const double y,
+    const void *state, const struct image *data, const double x, const double y,
     /* Output parameters */
     double *value, struct driz_error_t *error)
 {
@@ -435,7 +455,8 @@ interpolate_poly3(
     double coeff[4][4];
     double xval, yval;
     integer_t isize[2];
-    get_dimensions(data, isize);
+    isize[0] = data->size[0];
+    isize[1] = data->size[1];
 
     assert(state == NULL);
     INTERPOLATION_ASSERTS;
@@ -463,7 +484,7 @@ interpolate_poly3(
 
 static int
 interpolate_poly5(
-    const void *state, PyArrayObject *data, const double x, const double y,
+    const void *state, const struct image *data, const double x, const double y,
     /* Output parameters */
     double *value, struct driz_error_t *error)
 {
@@ -474,7 +495,8 @@ interpolate_poly5(
     double coeff[6][6];
     double xval, yval;
     integer_t isize[2];
-    get_dimensions(data, isize);
+    isize[0] = data->size[0];
+    isize[1] = data->size[1];
 
     assert(state == NULL);
     INTERPOLATION_ASSERTS;
@@ -504,7 +526,7 @@ interpolate_poly5(
 
 static int
 interpolate_lanczos(
-    const void *state, PyArrayObject *data, const double x, const double y,
+    const void *state, const struct image *data, const double x, const double y,
     /* Output parameters */
     double *value, struct driz_error_t *error)
 {
@@ -518,7 +540,8 @@ interpolate_lanczos(
     integer_t i, j;
     const struct lanczos_param_t *lanczos = (const struct lanczos_param_t *) state;
     integer_t isize[2];
-    get_dimensions(data, isize);
+    isize[0] = data->size[0];
+    isize[1] = data->size[1];
 
     assert(state);
     INTERPOLATION_ASSERTS;
@@ -550,7 +573,7 @@ interpolate_lanczos(
                 continue;
             }
 
-            sum += (double) get_pixel(data, i, j) * lanczos->lut[xoff] * luty;
+            sum += (double) image_get(data, i, j) * lanczos->lut[xoff] * luty;
         }
     }
 
@@ -651,7 +674,7 @@ doblot(struct driz_param_t *p)
             if (!npy_isnan(xo) && !npy_isnan(yo) && xo >= 0.0 && xo < (double) isize[0] &&
                 yo >= 0.0 && yo < (double) isize[1]) {
                 /* Check for look-up-table interpolation */
-                if (interpolate(state, p->data, xo, yo, &v, p->error)) {
+                if (interpolate(state, &p->data_image, xo, yo, &v, p->error)) {
                     goto doblot_exit_;
                 }
 
@@ -659,13 +682,13 @@ doblot(struct driz_param_t *p)
                     driz_error_format_message(p->error, "OOB in output_data[%d,%d]", i, j);
                     return 1;
                 } else {
-                    set_pixel(p->output_data, i, j, v * s);
+                    image_set(&p->output_data_image, i, j, v * s);
                 }
 
             } else {
                 /* If there is nothing for us then set the output to missing C
                    value flag */
-                set_pixel(p->output_data, i, j, p->fill_value);
+                image_set(&p->output_data_image, i, j, p->fill_value);
                 p->nmiss++;
             }
         }

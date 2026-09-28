@@ -49,10 +49,10 @@ def load_extension(path):
     return module
 
 
-def make_inputs(size):
+def make_inputs(size, dtype=np.float32):
     """Detector-sized image with a rotated and slightly distorted pixel map."""
     rng = np.random.default_rng(12345)
-    data = rng.random((size, size), dtype=np.float32) + 1.0
+    data = rng.random((size, size), dtype=dtype) + 1.0
     y, x = np.indices((size, size), dtype=np.float64)
     xc = x - size / 2
     yc = y - size / 2
@@ -109,8 +109,8 @@ def blot_case(interp, data, pixmap):
     return run
 
 
-def make_cases(size):
-    data, pixmap = make_inputs(size)
+def make_cases(size, dtype=np.float32):
+    data, pixmap = make_inputs(size, dtype)
     cases = {}
     for kernel in DRIZZLE_KERNELS:
         cases[f"tdriz_{kernel}"] = drizzle_case(kernel, data, pixmap)
@@ -137,6 +137,9 @@ def time_case(run, modules, repeat):
 def main():
     parser = argparse.ArgumentParser(description=__doc__.strip().splitlines()[0])
     parser.add_argument("--size", type=int, default=2048, help="image size in pixels")
+    parser.add_argument(
+        "--dtype", choices=["float32", "float64"], default="float32", help="image data type"
+    )
     parser.add_argument("--repeat", type=int, default=10, help="timings per case")
     parser.add_argument("-k", dest="select", help="only run cases containing this string")
     parser.add_argument("--against", metavar="SO", help="compiled extension to compare with")
@@ -154,8 +157,10 @@ def main():
             baseline = json.load(f)
         if baseline["meta"]["size"] != args.size:
             parser.error(f"baseline was run with --size {baseline['meta']['size']}")
+        if baseline["meta"].get("dtype", "float32") != args.dtype:
+            parser.error(f"baseline was run with --dtype {baseline['meta']['dtype']}")
 
-    cases = make_cases(args.size)
+    cases = make_cases(args.size, np.dtype(args.dtype))
     if args.select:
         cases = {name: case for name, case in cases.items() if args.select in name}
 
@@ -186,6 +191,7 @@ def main():
     if args.save:
         meta = {
             "size": args.size,
+            "dtype": args.dtype,
             "repeat": args.repeat,
             "drizzle": drizzle.__version__,
             "numpy": np.__version__,

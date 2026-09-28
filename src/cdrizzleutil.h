@@ -123,6 +123,21 @@ struct lanczos_param_t {
     double space;
 };
 
+/* Whether a set of images is all float32, all float64, or a mix of the two.
+   Code that is passed one of the first two as a constant is compiled without
+   a check of each image's type for every pixel. */
+enum image_types { images_float32, images_float64, images_mixed };
+
+/* A float32 or float64 image, with its data pointer, strides, and element
+   size looked up once from the numpy array, so that pixel access in the
+   drizzle kernels and in blot does not look them up for every pixel. */
+struct image {
+    char *data;
+    npy_intp strides[2];
+    npy_intp itemsize;
+    integer_t size[2]; /* x and y sizes, as from get_dimensions() */
+};
+
 struct driz_param_t {
     /* Options */
     enum e_kernel_t kernel;
@@ -177,6 +192,15 @@ struct driz_param_t {
 
     integer_t ndata2;
 
+    /* The float32 or float64 images above, set up by init_images() */
+    struct image data_image;
+    struct image weights_image;
+    struct image output_data_image;
+    struct image output_counts_image;
+    struct image *data2_images;
+    struct image *output_data2_images;
+    enum image_types output_types; /* of output_data, output_counts, output_data2 */
+
     /* Other output */
     integer_t nmiss;
     integer_t nskip;
@@ -191,6 +215,14 @@ struct, e.g. cdrizzle_, to fill the struct with valid parameters.
 */
 void
 driz_param_init(struct driz_param_t *p);
+
+/* Set up the struct image fields of 'p' from its numpy arrays. Returns 1 and
+   sets p->error when memory cannot be allocated. */
+int
+init_images(struct driz_param_t *p);
+
+void
+free_images(struct driz_param_t *p);
 
 void
 driz_param_dump(struct driz_param_t *p);
@@ -338,19 +370,70 @@ get_uint_pixel(PyArrayObject *image, integer_t xpix, integer_t ypix)
     return *(unsigned int *) PyArray_GETPTR2(image, ypix, xpix);
 }
 
-/* Images are stored as float32; values are read and written as double so
+/* Images are float32 or float64; values are read and written as double so
    that all arithmetic is done in double precision. */
 static inline_macro double
 get_pixel(PyArrayObject *image, integer_t xpix, integer_t ypix)
 {
-    return *(float *) PyArray_GETPTR2(image, ypix, xpix);
+    void *ptr = PyArray_GETPTR2(image, ypix, xpix);
+
+    if (PyArray_TYPE(image) == NPY_DOUBLE) {
+        return *(double *) ptr;
+    }
+    return *(float *) ptr;
 }
 
 static inline_macro void
 set_pixel(PyArrayObject *image, integer_t xpix, integer_t ypix, double value)
 {
-    *(float *) PyArray_GETPTR2(image, (Py_ssize_t) ypix, (Py_ssize_t) xpix) = (float) value;
-    return;
+    void *ptr = PyArray_GETPTR2(image, (Py_ssize_t) ypix, (Py_ssize_t) xpix);
+
+    if (PyArray_TYPE(image) == NPY_DOUBLE) {
+        *(double *) ptr = value;
+    } else {
+        *(float *) ptr = (float) value;
+    }
+}
+
+/* The same as get_pixel() and set_pixel(), for images set up by
+   init_images(). 'types' says whether the image is float32 or float64, or is
+   images_mixed to look that up for each pixel. */
+static always_inline_macro double
+image_get_as(
+    const struct image *image, integer_t xpix, integer_t ypix, const enum image_types types)
+{
+    const char *ptr = image->data + ypix * image->strides[0] + xpix * image->strides[1];
+
+    if (types == images_float64 || (types == images_mixed && image->itemsize == sizeof(double))) {
+        return *(const double *) ptr;
+    }
+    return *(const float *) ptr;
+}
+
+static always_inline_macro void
+image_set_as(
+    const struct image *image, integer_t xpix, integer_t ypix, double value,
+    const enum image_types types)
+{
+    char *ptr = image->data + ypix * image->strides[0] + xpix * image->strides[1];
+
+    if (types == images_float64 || (types == images_mixed && image->itemsize == sizeof(double))) {
+        *(double *) ptr = value;
+    } else {
+        *(float *) ptr = (float) value;
+    }
+}
+
+static inline_macro double
+image_get(const struct image *image, integer_t xpix, integer_t ypix)
+{
+    return image_get_as(image, xpix, ypix, images_mixed);
+}
+
+static inline_macro void
+image_set(const struct image *image, integer_t xpix, integer_t ypix, double value)
+{
+    image_set_as(image, xpix, ypix, value, images_mixed);
 }
 
 static inline_macro void

@@ -254,6 +254,94 @@ driz_param_init(struct driz_param_t *p)
     p->nmiss = 0;
     p->nskip = 0;
     p->error = NULL;
+
+    memset(&p->data_image, 0, sizeof(struct image));
+    memset(&p->weights_image, 0, sizeof(struct image));
+    memset(&p->output_data_image, 0, sizeof(struct image));
+    memset(&p->output_counts_image, 0, sizeof(struct image));
+    p->data2_images = NULL;
+    p->output_data2_images = NULL;
+    p->output_types = images_mixed;
+}
+
+static void
+count_image_type(const struct image *image, int *nfloat32, int *nfloat64)
+{
+    if (image->data == NULL) {
+        return;
+    }
+    if (image->itemsize == sizeof(double)) {
+        ++*nfloat64;
+    } else {
+        ++*nfloat32;
+    }
+}
+
+static void
+init_image(struct image *image, PyArrayObject *array)
+{
+    memset(image, 0, sizeof(struct image));
+    if (array == NULL) {
+        return;
+    }
+    image->data = PyArray_DATA(array);
+    image->strides[0] = PyArray_STRIDE(array, 0);
+    image->strides[1] = PyArray_STRIDE(array, 1);
+    /* Images are float32 or float64 */
+    image->itemsize = (PyArray_TYPE(array) == NPY_DOUBLE) ? sizeof(double) : sizeof(float);
+    get_dimensions(array, image->size);
+}
+
+int
+init_images(struct driz_param_t *p)
+{
+    integer_t k;
+    int nfloat32, nfloat64;
+
+    init_image(&p->data_image, p->data);
+    init_image(&p->weights_image, p->weights);
+    init_image(&p->output_data_image, p->output_data);
+    init_image(&p->output_counts_image, p->output_counts);
+    p->data2_images = NULL;
+    p->output_data2_images = NULL;
+
+    if (p->ndata2 > 0) {
+        p->data2_images = (struct image *) malloc(p->ndata2 * sizeof(struct image));
+        p->output_data2_images = (struct image *) malloc(p->ndata2 * sizeof(struct image));
+        if (p->data2_images == NULL || p->output_data2_images == NULL) {
+            free_images(p);
+            driz_error_set(p->error, PyExc_MemoryError, "Memory allocation failed.");
+            return 1;
+        }
+        for (k = 0; k < p->ndata2; ++k) {
+            init_image(&p->data2_images[k], p->data2 ? p->data2[k] : NULL);
+            init_image(&p->output_data2_images[k], p->output_data2 ? p->output_data2[k] : NULL);
+        }
+    }
+
+    nfloat32 = nfloat64 = 0;
+    count_image_type(&p->output_data_image, &nfloat32, &nfloat64);
+    count_image_type(&p->output_counts_image, &nfloat32, &nfloat64);
+    for (k = 0; k < p->ndata2; ++k) {
+        count_image_type(&p->output_data2_images[k], &nfloat32, &nfloat64);
+    }
+    if (nfloat64 == 0) {
+        p->output_types = images_float32;
+    } else if (nfloat32 == 0) {
+        p->output_types = images_float64;
+    } else {
+        p->output_types = images_mixed;
+    }
+    return 0;
+}
+
+void
+free_images(struct driz_param_t *p)
+{
+    free(p->data2_images);
+    free(p->output_data2_images);
+    p->data2_images = NULL;
+    p->output_data2_images = NULL;
 }
 
 /*****************************************************************

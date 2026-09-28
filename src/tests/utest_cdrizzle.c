@@ -329,6 +329,7 @@ setup_parameters(void)
     fill_image(p->output_data, 0.0);
     fill_image(p->output_counts, 0.0);
     unset_context(p->output_context);
+    init_images(p);
 
     if (strlen(log_file)) {
         logptr = fopen(log_file, "a");
@@ -347,6 +348,7 @@ teardown_parameters(struct driz_param_t *p)
         logptr = NULL;
     }
 
+    free_images(p);
     free(p->error);
     free(p);
 }

@@ -18,6 +18,13 @@ Release Notes
   float32, which made it less accurate at large pixel coordinates (about
   1e-4 pixel near x = 4000). The "turbo" kernel is about 15% slower.
 
+- ``cdrizzle.tdriz`` and ``cdrizzle.tblot`` now accept float64 images,
+  weights, and output arrays as well as float32 ones, and use them as they
+  are. Other numeric input types are converted to float64 instead of float32,
+  so 32- and 64-bit integer data, which used to be rejected, are accepted.
+  Results for float32 arrays are unchanged. ``Drizzle`` and ``blot_image``
+  still convert their arrays to float32.
+
 
 3.0.1 (unreleased)
 

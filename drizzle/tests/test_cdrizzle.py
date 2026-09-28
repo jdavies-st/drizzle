@@ -32,26 +32,26 @@ def test_cdrizzle():
     )
 
 
-def _input_arrays(shape):
+def _input_arrays(shape, dtype=np.float32):
     y, x = np.indices(shape)
-    data = (x + 10.0 * y).astype(np.float32)
+    data = (x + 10.0 * y).astype(dtype)
     # shift by a fraction of a pixel so that output pixels mix input pixels
     pixmap = np.dstack([x, y]).astype(np.float64) + 0.25
     return {
         "input": data,
-        "weights": np.ones(shape, dtype=np.float32),
+        "weights": np.ones(shape, dtype=dtype),
         "pixmap": pixmap,
         "input2": [2.0 * data],
         "dq": np.ones(shape, dtype=np.uint32),
     }
 
 
-def _output_arrays(shape):
+def _output_arrays(shape, dtype=np.float32):
     return {
-        "output": np.zeros(shape, dtype=np.float32),
-        "counts": np.zeros(shape, dtype=np.float32),
+        "output": np.zeros(shape, dtype=dtype),
+        "counts": np.zeros(shape, dtype=dtype),
         "context": np.zeros(shape, dtype=np.int32),
-        "output2": [np.zeros(shape, dtype=np.float32)],
+        "output2": [np.zeros(shape, dtype=dtype)],
         "outdq": np.zeros(shape, dtype=np.uint32),
     }
 
@@ -84,16 +84,16 @@ def _byte_swapped(arr):
     return arr.astype(arr.dtype.newbyteorder())
 
 
-def _float64(arr):
-    return arr.astype(np.float64)
+def _int32(arr):
+    return arr.astype(np.int32)
 
 
-@pytest.mark.parametrize("modify", [_non_contiguous, _read_only, _byte_swapped, _float64])
+@pytest.mark.parametrize("modify", [_non_contiguous, _read_only, _byte_swapped, _int32])
 def test_tdriz_rejects_output_not_updatable_in_place(modify):
     """
     tdriz raises ValueError for an 'output' array that it cannot update in
-    place: non-contiguous, read-only, byte-swapped, or float64. It used to
-    write the results to a temporary copy, and they were lost.
+    place: non-contiguous, read-only, byte-swapped, or not float32 or float64.
+    It used to write the results to a temporary copy, and they were lost.
     """
     outputs = _output_arrays(SHAPE)
     outputs["output"] = modify(outputs["output"])
@@ -236,11 +236,11 @@ def test_tdriz_byte_swapped_dq():
     np.testing.assert_array_equal(outputs["outdq"], expected["outdq"])
 
 
-@pytest.mark.parametrize("modify", [_non_contiguous, _read_only, _byte_swapped, _float64])
+@pytest.mark.parametrize("modify", [_non_contiguous, _read_only, _byte_swapped, _int32])
 def test_tblot_rejects_output_not_updatable_in_place(modify):
     """
     tblot raises an error for an output array that it cannot update in
-    place: non-contiguous, read-only, byte-swapped, or float64.
+    place: non-contiguous, read-only, byte-swapped, or not float32 or float64.
     """
     inputs = _input_arrays(SHAPE)
     output = modify(np.zeros(SHAPE, dtype=np.float32))
@@ -305,3 +305,134 @@ def test_clip_polygon_invalid_second_polygon():
     """clip_polygon raises ValueError when the second polygon is not an array."""
     with pytest.raises(ValueError, match="Invalid Q"):
         cdrizzle.clip_polygon(_SQUARE, "not an array")
+
+
+# float64 arrays are used as they are, and computed in double precision.
+
+
+def test_tdriz_float64_arrays_match_float32():
+    """
+    tdriz gives the same results for float64 input and output arrays as for
+    float32 ones, to within float32 rounding.
+    """
+    expected = _output_arrays(SHAPE)
+    _tdriz(_input_arrays(SHAPE), expected)
+
+    outputs = _output_arrays(SHAPE, np.float64)
+    _tdriz(_input_arrays(SHAPE, np.float64), outputs)
+
+    np.testing.assert_allclose(outputs["output"], expected["output"], rtol=1e-6)
+    np.testing.assert_allclose(outputs["counts"], expected["counts"], rtol=1e-6)
+    np.testing.assert_allclose(outputs["output2"][0], expected["output2"][0], rtol=1e-6)
+    np.testing.assert_array_equal(outputs["context"], expected["context"])
+    np.testing.assert_array_equal(outputs["outdq"], expected["outdq"])
+
+
+def test_tdriz_float64_keeps_full_precision():
+    """
+    tdriz with float64 arrays reproduces values near 1e6 that differ by 1e-6
+    when drizzling onto the same pixel grid. float32 holds values near 1e6
+    only to about 0.06.
+    """
+    y, x = np.indices(SHAPE)
+    data = 1.0e6 + 1.0e-6 * (x + 10.0 * y)
+    inputs = {
+        "input": data,
+        "weights": np.ones(SHAPE),
+        "pixmap": np.dstack([x, y]).astype(np.float64),
+    }
+    outputs = {
+        "output": np.zeros(SHAPE),
+        "counts": np.zeros(SHAPE),
+        "context": np.zeros(SHAPE, dtype=np.int32),
+    }
+
+    _tdriz(inputs, outputs)
+
+    np.testing.assert_allclose(outputs["output"], data, rtol=0, atol=1e-9)
+
+
+def test_tdriz_float32_input_with_float64_outputs():
+    """
+    tdriz accepts float32 input arrays with float64 output arrays, and gives
+    the same results as with float32 output arrays, to within float32
+    rounding.
+    """
+    expected = _output_arrays(SHAPE)
+    _tdriz(_input_arrays(SHAPE), expected)
+
+    outputs = _output_arrays(SHAPE, np.float64)
+    _tdriz(_input_arrays(SHAPE), outputs)
+
+    np.testing.assert_allclose(outputs["output"], expected["output"], rtol=1e-6)
+    np.testing.assert_allclose(outputs["counts"], expected["counts"], rtol=1e-6)
+
+
+def test_tdriz_output_arrays_of_different_float_types():
+    """
+    tdriz accepts output arrays of different float types in one call, here a
+    float64 'output' with float32 'counts' and 'output2', and gives the same
+    results as with all float32 output arrays, to within float32 rounding.
+    """
+    expected = _output_arrays(SHAPE)
+    _tdriz(_input_arrays(SHAPE), expected)
+
+    outputs = _output_arrays(SHAPE)
+    outputs["output"] = np.zeros(SHAPE, dtype=np.float64)
+    _tdriz(_input_arrays(SHAPE), outputs)
+
+    np.testing.assert_allclose(outputs["output"], expected["output"], rtol=1e-6)
+    np.testing.assert_array_equal(outputs["counts"], expected["counts"])
+    np.testing.assert_allclose(outputs["output2"][0], expected["output2"][0], rtol=1e-6)
+
+
+@pytest.mark.parametrize("dtype", [np.uint16, np.int32])
+def test_tdriz_accepts_integer_data(dtype):
+    """
+    tdriz converts integer input data, such as uint16 detector counts, to
+    float64, and gives the same results as for the same values in float32.
+    32- and 64-bit integer data used to be rejected.
+    """
+    inputs = _input_arrays(SHAPE)
+    # values above 32767 need the full uint16 range
+    inputs["input"] = inputs["input"] + 40000
+    expected = _output_arrays(SHAPE)
+    _tdriz(inputs, expected)
+
+    inputs["input"] = inputs["input"].astype(dtype)
+    outputs = _output_arrays(SHAPE)
+    _tdriz(inputs, outputs)
+
+    np.testing.assert_array_equal(outputs["output"], expected["output"])
+
+
+def test_tblot_float64_arrays_match_float32():
+    """
+    tblot gives the same result for float64 data and output arrays as for
+    float32 ones, to within float32 rounding.
+    """
+    inputs = _input_arrays(SHAPE)
+    expected = np.zeros(SHAPE, dtype=np.float32)
+    cdrizzle.tblot(inputs["input"], inputs["pixmap"], expected, interp="linear")
+
+    inputs = _input_arrays(SHAPE, np.float64)
+    output = np.zeros(SHAPE, dtype=np.float64)
+    cdrizzle.tblot(inputs["input"], inputs["pixmap"], output, interp="linear")
+
+    np.testing.assert_allclose(output, expected, rtol=1e-6)
+
+
+def test_tblot_float64_keeps_full_precision():
+    """
+    tblot with float64 arrays reproduces values near 1e6 that differ by 1e-6
+    when blotting onto the same pixel grid. float32 holds values near 1e6
+    only to about 0.06.
+    """
+    y, x = np.indices(SHAPE)
+    data = 1.0e6 + 1.0e-6 * (x + 10.0 * y)
+    pixmap = np.dstack([x, y]).astype(np.float64)
+    output = np.zeros(SHAPE, dtype=np.float64)
+
+    cdrizzle.tblot(data, pixmap, output, interp="linear")
+
+    np.testing.assert_allclose(output, data, rtol=0, atol=1e-9)

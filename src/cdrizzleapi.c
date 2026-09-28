@@ -82,43 +82,50 @@ ensure_array(PyObject *obj, int npy_type, int min_depth, int max_depth, int *is_
     }
 }
 
-/* Return 'obj' when the C code can write to it in place: a 2D array of the
-   given type that is C-contiguous, aligned, writeable and in native byte
-   order. Any other array would have to be copied, and results written to a
-   copy would be lost, so NULL is returned and 'error' is set instead. The
-   returned reference is borrowed. */
+/* Return 'obj' as a 2D image that the C code can read directly. float32 and
+   float64 images keep their type, and anything else is converted to float64.
+   When a new array is returned, '*is_copy' is set and the caller must release
+   it. */
 static PyArrayObject *
-get_output_array(PyObject *obj, int npy_type, const char *name, struct driz_error_t *error)
+ensure_float_array(PyObject *obj, int *is_copy)
+{
+    int npy_type = NPY_DOUBLE;
+
+    if (PyArray_Check(obj) && PyArray_TYPE((PyArrayObject *) obj) == NPY_FLOAT) {
+        npy_type = NPY_FLOAT;
+    }
+    return ensure_array(obj, npy_type, 2, 2, is_copy);
+}
+
+/* Return 'obj' when the C code can write to it in place: a 2D array of type
+   'npy_type', or of type 'npy_type2' unless that is NPY_NOTYPE, that is
+   C-contiguous, aligned, writeable and in native byte order. Any other array
+   would have to be copied, and results written to a copy would be lost, so
+   NULL is returned and 'error' is set instead, naming the allowed
+   'type_names'. The returned reference is borrowed. */
+static PyArrayObject *
+get_output_array(
+    PyObject *obj, int npy_type, int npy_type2, const char *type_names, const char *name,
+    struct driz_error_t *error)
 {
     PyArrayObject *arr;
-    const char *type_name;
+    int type_ok;
 
     if (PyArray_Check(obj)) {
         arr = (PyArrayObject *) obj;
-        if (PyArray_EquivTypenums(PyArray_TYPE(arr), npy_type) && PyArray_NDIM(arr) == 2 &&
-            PyArray_ISCARRAY(arr) && PyArray_ISNOTSWAPPED(arr)) {
+        type_ok = PyArray_EquivTypenums(PyArray_TYPE(arr), npy_type) ||
+                  (npy_type2 != NPY_NOTYPE && PyArray_EquivTypenums(PyArray_TYPE(arr), npy_type2));
+        if (type_ok && PyArray_NDIM(arr) == 2 && PyArray_ISCARRAY(arr) &&
+            PyArray_ISNOTSWAPPED(arr)) {
             return arr;
         }
     }
 
-    switch (npy_type) {
-        case NPY_FLOAT:
-            type_name = "float32";
-            break;
-        case NPY_INT32:
-            type_name = "int32";
-            break;
-        case NPY_UINT32:
-            type_name = "uint32";
-            break;
-        default:
-            type_name = "numeric";
-    }
     driz_error_format_message(
         error,
         "'%s' must be a 2D %s array that is C-contiguous, aligned, writeable, "
         "and in native byte order.",
-        name, type_name);
+        name, type_names);
     return NULL;
 }
 
@@ -158,10 +165,10 @@ process_array_list(
             return 1;
         }
         if (is_output) {
-            arr = get_output_array(list, NPY_FLOAT, name, error);
+            arr = get_output_array(list, NPY_FLOAT, NPY_DOUBLE, "float32 or float64", name, error);
             cpy = 0;
         } else {
-            arr = ensure_array(list, NPY_FLOAT, 2, 2, &cpy);
+            arr = ensure_float_array(list, &cpy);
             if (!arr) {
                 driz_error_set(error, PyExc_ValueError, "Invalid '%s' array.", name);
             }
@@ -232,10 +239,11 @@ process_array_list(
             }
         } else {
             if (is_output) {
-                arr = get_output_array(list_elem, NPY_FLOAT, name, error);
+                arr = get_output_array(
+                    list_elem, NPY_FLOAT, NPY_DOUBLE, "float32 or float64", name, error);
                 cpy = 0;
             } else {
-                arr = ensure_array(list_elem, NPY_FLOAT, 2, 2, &cpy);
+                arr = ensure_float_array(list_elem, &cpy);
                 if (!arr) {
                     driz_error_set(
                         error, PyExc_ValueError, "Invalid array in '%s' at position %d.", name, i);
@@ -312,7 +320,7 @@ tdriz(PyObject *self, PyObject *args, PyObject *keywords)
     /* Arguments in the order they appear */
     PyObject *oimg, *owei, *pixmap, *oout, *owht, *ocon, *odq = NULL;
     PyObject *oimg2 = NULL, *oout2 = NULL, *ooutdq = NULL, *opscale_ratio = NULL, *oscale = NULL;
-    int i, n_none;
+    int i, n_none, status;
     int nsq_args, nsq_arr = 0, nsq_arr_out = 0;
     int *free_arrays2 = NULL, *free_out_arrays2 = NULL;
 
@@ -414,13 +422,13 @@ tdriz(PyObject *self, PyObject *args, PyObject *keywords)
     }
 
     /* Get raw C-array data */
-    img = ensure_array(oimg, NPY_FLOAT, 2, 2, &free_img);
+    img = ensure_float_array(oimg, &free_img);
     if (!img) {
         driz_error_set_message(&error, "Invalid input array");
         goto _exit;
     }
 
-    wei = ensure_array(owei, NPY_FLOAT, 2, 2, &free_wei);
+    wei = ensure_float_array(owei, &free_wei);
     if (!wei) {
         driz_error_set_message(&error, "Invalid weights array");
         goto _exit;
@@ -432,12 +440,12 @@ tdriz(PyObject *self, PyObject *args, PyObject *keywords)
         goto _exit;
     }
 
-    out = get_output_array(oout, NPY_FLOAT, "output", &error);
+    out = get_output_array(oout, NPY_FLOAT, NPY_DOUBLE, "float32 or float64", "output", &error);
     if (!out) {
         goto _exit;
     }
 
-    wht = get_output_array(owht, NPY_FLOAT, "counts", &error);
+    wht = get_output_array(owht, NPY_FLOAT, NPY_DOUBLE, "float32 or float64", "counts", &error);
     if (!wht) {
         goto _exit;
     }
@@ -445,7 +453,7 @@ tdriz(PyObject *self, PyObject *args, PyObject *keywords)
     if (ocon == Py_None) {
         con = NULL;
     } else {
-        con = get_output_array(ocon, NPY_INT32, "context", &error);
+        con = get_output_array(ocon, NPY_INT32, NPY_NOTYPE, "int32", "context", &error);
         if (!con) {
             goto _exit;
         }
@@ -468,7 +476,7 @@ tdriz(PyObject *self, PyObject *args, PyObject *keywords)
         }
         outdq = NULL;
     } else {
-        outdq = get_output_array(ooutdq, NPY_UINT32, "outdq", &error);
+        outdq = get_output_array(ooutdq, NPY_UINT32, NPY_NOTYPE, "uint32", "outdq", &error);
         if (!outdq) {
             goto _exit;
         }
@@ -735,7 +743,12 @@ tdriz(PyObject *self, PyObject *args, PyObject *keywords)
         goto _exit;
     }
 
-    if (dobox(&p)) {
+    if (init_images(&p)) {
+        goto _exit;
+    }
+    status = dobox(&p);
+    free_images(&p);
+    if (status) {
         goto _exit;
     }
 
@@ -825,7 +838,7 @@ tblot(PyObject *self, PyObject *args, PyObject *keywords)
     struct driz_param_t p;
     integer_t psize[2], osize[2];
     char warn_msg[128];
-    int free_img = 0, free_map = 0;
+    int free_img = 0, free_map = 0, status;
 
     driz_log_handle = driz_log_init(driz_log_handle);
     driz_log_message("starting tblot");
@@ -938,7 +951,7 @@ tblot(PyObject *self, PyObject *args, PyObject *keywords)
         ef = 1.0;
     }
 
-    img = ensure_array(oimg, NPY_FLOAT, 2, 2, &free_img);
+    img = ensure_float_array(oimg, &free_img);
     if (!img) {
         driz_error_set_message(&error, "Invalid input array");
         goto _exit;
@@ -950,7 +963,7 @@ tblot(PyObject *self, PyObject *args, PyObject *keywords)
         goto _exit;
     }
 
-    out = get_output_array(oout, NPY_FLOAT, "output", &error);
+    out = get_output_array(oout, NPY_FLOAT, NPY_DOUBLE, "float32 or float64", "output", &error);
     if (!out) {
         goto _exit;
     }
@@ -1013,7 +1026,12 @@ tblot(PyObject *self, PyObject *args, PyObject *keywords)
         goto _exit;
     }
 
-    if (doblot(&p)) {
+    if (init_images(&p)) {
+        goto _exit;
+    }
+    status = doblot(&p);
+    free_images(&p);
+    if (status) {
         goto _exit;
     }
 
@@ -1076,9 +1094,12 @@ test_cdrizzle(PyObject *self, PyObject *args)
         return PyErr_Format(PyExc_ValueError, "Invalid pixmap.");
     }
 
-    if (!(odat = get_output_array(output_data, NPY_FLOAT, "output_data", &error)) ||
-        !(ocnt = get_output_array(output_counts, NPY_FLOAT, "output_counts", &error)) ||
-        !(ocon = get_output_array(output_context, NPY_INT32, "output_context", &error))) {
+    if (!(odat = get_output_array(
+              output_data, NPY_FLOAT, NPY_NOTYPE, "float32", "output_data", &error)) ||
+        !(ocnt = get_output_array(
+              output_counts, NPY_FLOAT, NPY_NOTYPE, "float32", "output_counts", &error)) ||
+        !(ocon = get_output_array(
+              output_context, NPY_INT32, NPY_NOTYPE, "int32", "output_context", &error))) {
         return PyErr_Format(PyExc_ValueError, "%s", driz_error_get_message(&error));
     }
 
